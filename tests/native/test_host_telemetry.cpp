@@ -22,7 +22,7 @@ public:
     std::optional<std::string> load_rom(const std::string&) override { return std::nullopt; }
     std::optional<std::string> load_bundled_rom() override { return std::nullopt; }
     std::optional<std::string> choose_rom() override { return std::nullopt; }
-    std::optional<std::string> poll_rom() override { return std::nullopt; }
+    std::optional<ImportEvent> poll_import() override { return std::nullopt; }
     std::optional<std::string> stored_rom() override { return std::nullopt; }
     void pause(bool) override {}
     void set_pad(int, unsigned, double, double) override {}

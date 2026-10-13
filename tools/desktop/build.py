@@ -51,13 +51,15 @@ def publish_bundle(staged: Path, app: Path, previous: Path) -> None:
         if stale.is_dir() and not stale.is_symlink(): shutil.rmtree(stale)
 
 def stage_resources(resources: Path, module: Path) -> None:
-    """Shell resources: the overlay font, its license, the game module (ADR-086) and, when generated, the app icon."""
+    """Shell resources: the overlay font, its license, the game module (ADR-086) and, when generated, the app icon (also for the start screen)."""
     resources.mkdir(parents=True, exist_ok=True)
     shutil.copy2(module, resources / module.name)
     shutil.copy2(FONT, resources / FONT.name)
     shutil.copy2(FONT_LICENSE, resources / 'LICENSE-DejaVu.txt')
     if icon := installed_icon('StarCraft64.icns'):
         shutil.copy2(icon, resources / icon.name)
+    if icon := installed_icon('StarCraft64.png'):  # the start screen shows it
+        shutil.copy2(icon, resources / 'launcher-icon.png')
 
 def run(args: list[str], **kwargs) -> None:
     subprocess.run(args, check=True, **kwargs)

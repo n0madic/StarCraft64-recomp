@@ -54,6 +54,7 @@ User-facing discussion is normally Russian. All project documentation is English
 - `native/host/`: standalone native capture host and file PCM output.
 - `native/shell/`: SDL3 application (`app.cpp`), session, lifecycle, audio, mailbox,
   ROM import, presentation selection (`native.cpp`), video/overlay, host scripts.
+- `native/shell/launcher_screen.*`: the start screen (icon, title, Select ROM / Select game module buttons; ADR-091).
 - `native/shell/input/`: SDL-free gesture/menu/HUD/minimap/touch-pad adapters.
 - `tools/desktop/package.py`, `notices.py`: release launcher packages and their license texts
   (ADR-088). Launchers never contain the ROM, generated code, the game module or the game icon.

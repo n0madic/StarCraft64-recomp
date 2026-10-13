@@ -64,7 +64,12 @@ class LayoutTests(Workspace):
         mac = layouts['macos']['StarCraft64.app/Contents/Resources/StarCraft64.icns']
         self.assertEqual(mac, self.icons / 'StarCraft64.icns')
         self.assertEqual(layouts['linux']['StarCraft64.png'], self.icons / 'StarCraft64.png')
-        self.assertFalse([name for name in layouts['windows'] if name.endswith(('.ico', '.png', '.rc'))])  # embedded in the exe
+        self.assertFalse([name for name in layouts['windows'] if name.endswith(('.ico', '.rc'))])  # embedded in the exe
+        # The start screen draws the same neutral icon on every platform, from a file beside the resources.
+        self.assertEqual(layouts['windows']['launcher-icon.png'], self.icons / 'StarCraft64.png')
+        self.assertEqual(layouts['linux']['launcher-icon.png'], self.icons / 'StarCraft64.png')
+        self.assertEqual(layouts['macos']['StarCraft64.app/Contents/Resources/launcher-icon.png'], self.icons / 'StarCraft64.png')
+        self.assertEqual([name for name in layouts['windows'] if name.endswith('.png')], ['launcher-icon.png'])
         self.assertIn(b'<key>CFBundleIconFile</key>', package.info_plist())
 
     def test_the_game_derived_icon_is_never_read(self):

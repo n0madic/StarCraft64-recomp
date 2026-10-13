@@ -35,7 +35,8 @@ NATIVE_TEST_TARGETS = (
     'sc64_guest_fpu_test', 'sc64_gfx_test', 'sc64_rom_import_test', 'sc64_sha_test',
     'sc64_desktop_input_test', 'sc64_touch_input_test', 'sc64_gestures_test', 'sc64_map_taps_test',
     'sc64_hud_input_test', 'sc64_hud_buttons_test', 'sc64_menu_input_test', 'sc64_haptics_test',
-    'sc64_host_telemetry_test', 'sc64_loop_watch_test', 'sc64_game_module_test', 'sc64_setup_test', 'sc64_game_build_test')
+    'sc64_host_telemetry_test', 'sc64_loop_watch_test', 'sc64_game_module_test', 'sc64_setup_test', 'sc64_game_build_test',
+    'sc64_launcher_screen_test', 'sc64_log_test')
 
 # Pins of the recompilation environment (the splat research workflow has its own, see
 # docs/research-workflow.md): `recompile_all.py` needs spimdisasm and its disassembler;

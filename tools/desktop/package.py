@@ -185,6 +185,7 @@ def layout(target: str, binaries: dict[str, Path], notice_files: dict[str, str],
         if target == 'linux':
             files['StarCraft64.png'] = icons / 'StarCraft64.png'  # the Windows exe embeds its icon instead
     files[resources + 'DejaVuSansMono-Bold.ttf'] = bootstrap.FONT
+    files[resources + 'launcher-icon.png'] = icons / 'StarCraft64.png'  # shown on the start screen
     for relative, source in setup_resource_sources().items():
         files[resources + 'setup-resources/' + relative] = source
     for name, text in notice_files.items():  # NOTICE.txt, SOURCE.txt, LICENSES/*

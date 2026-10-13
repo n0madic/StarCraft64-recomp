@@ -149,21 +149,22 @@ void Session::launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::p
         throw;
     }
 }
-std::optional<std::string> Session::poll_build() {
+std::optional<Session::BuildProgress> Session::poll_build() {
 #if defined(SC64_HAS_SETUP)
+    using State = BuildProgress::State;
     if (!pending_) return std::nullopt;
     const auto state = build_.poll();
     if (!state) return std::nullopt;
-    if (state->running) return state->text;
+    if (state->running) return BuildProgress{State::running, state->text};
     auto pending = std::move(*pending_);
     pending_.reset();
-    if (state->failed) return state->text;
+    if (state->failed) return BuildProgress{State::failed, state->text};
     try {
         launch_rom(std::move(state->rom), pending.storage, pending.persist, false);
     } catch (const std::exception& error) {
-        return std::string(error.what());
+        return BuildProgress{State::failed, error.what()};
     }
-    return std::string();
+    return BuildProgress{State::started, {}};
 #else
     return std::nullopt;
 #endif

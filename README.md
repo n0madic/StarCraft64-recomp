@@ -135,7 +135,7 @@ Add `BUNDLE_ROM=1 ROM="/path/to/your.z64"` to `make build-appimage` to pack the 
 and start straight into the game (`StarCraft64-x86_64-bundled-rom.AppImage`); like the
 bundled APK it is strictly personal.
 
-On Android, tap the start screen to choose your ROM through the system picker.
+On Android, the start screen has a "Select ROM" button that opens the system picker (the launcher APK also has "Select game module").
 To skip the picker, build with `BUNDLE_ROM=1 ROM="/path/to/your.z64"`; the ROM is
 then packed into that APK, which makes it strictly personal and never shareable.
 For an Android emulator use `make build-android-opengles` instead (the default

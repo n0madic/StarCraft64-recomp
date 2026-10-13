@@ -185,7 +185,9 @@ make setup-game ROM="/path/to/your.z64" MODULE_TARGET=android-arm64 [NDK=...] [D
 
 The result is `<storage>/game-android-arm64/sc64-game.so` with its own `receipt.json` (`"target"`), and
 the host module is not touched. It is private like any other module and must not be published. A phone
-loads it only from the app's internal files directory (D-062 lists what is still open).
+loads it only from the app's internal files directory (D-062 lists what is still open). The Android launcher
+can also take it from the start screen: "Select game module" (or M) copies the picked file into that directory
+after loading it once to check it (ADR-091).
 
 ## Launch and controls
 
@@ -195,9 +197,10 @@ python3 tools/desktop/run.py --rom "/absolute/path/to/your.z64" --output local/r
 
 Use a fresh output name. The launcher keeps ROM/save storage at
 `local/private/desktop/default`, records binary/resource/input hashes, the
-engine log, wall duration and exit status (run receipt schema 3). Without a ROM,
-click/tap or press O to open the system file chooser; the chosen file is copied
-into storage, validated and persisted. A directly launched app stores data in
+engine log, wall duration and exit status (run receipt schema 3). Without a ROM
+the start screen (icon, title, what to choose next) offers "Select ROM" (button or O), which opens the system file chooser; the chosen file is copied
+into storage, validated and persisted. An interactive run logs at `info` level; telemetry, window lifecycle and input traces are `DEBUG` lines (ADR-092), written
+when the log level is `debug` (`--log-level debug`, which timed and traced runs use by default). A directly launched app stores data in
 `SDL_GetPrefPath` (`~/Library/Application Support/StarCraft64`,
 `%APPDATA%\StarCraft64`, `~/.local/share/StarCraft64`). The importer accepts
 z64/v64/n64 byte order, normalizes and checks SHA-1

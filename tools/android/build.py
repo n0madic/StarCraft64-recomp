@@ -63,7 +63,9 @@ def launcher_manifest(text: str) -> str:
     return text
 
 def config_text(render_driver: str, bundled_rom: bool) -> str:
+    # DEBUG lines (telemetry, lifecycle) are what the smoke and audio probes read from logcat, which filters by priority itself.
     return ('sc64.compact_telemetry = 1\n'
+            'sc64.log_level = debug\n'
             f'sc64.render_driver = {RENDER_DRIVER_CHAINS[render_driver]}\n'
             f'sc64.bundled_rom = {int(bundled_rom)}\n')
 
@@ -190,6 +192,8 @@ def main() -> None:
             dst.writestr(check_apk.ENGINE_MEMBER, library.read_bytes(), compress_type=ZIP_STORED)
             dst.writestr('assets/DejaVuSansMono-Bold.ttf', bootstrap.FONT.read_bytes(), compress_type=ZIP_DEFLATED)
             dst.writestr('assets/LICENSE-DejaVu.txt', bootstrap.FONT_LICENSE.read_bytes(), compress_type=ZIP_DEFLATED)
+            # The start screen shows the application icon (the neutral one in the launcher).
+            dst.writestr('assets/launcher-icon.png', (staging / 'res/mipmap-xxxhdpi/icon.png').read_bytes(), compress_type=ZIP_DEFLATED)
             # Intent arguments still override the packaged driver.
             dst.writestr('assets/sc64/config.ini', config_text(args.render_driver, bundled_rom is not None),
                          compress_type=ZIP_DEFLATED)

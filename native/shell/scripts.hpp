@@ -3,6 +3,7 @@
 #include "input/gestures.hpp"
 #include "json/json.hpp"
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -19,6 +20,8 @@
 // are physical window pixels; both have a bottom-left origin.
 namespace sc64::shell {
 constexpr double design_width = 960, design_height = 720;
+// How long a pressed start-screen button keeps its look after the contact ended.
+constexpr double pressed_look_seconds = 0.15;
 
 struct Touch {
     std::string id;
@@ -52,6 +55,37 @@ private:
     std::map<std::string, std::string> values_;
 };
 
+// What the start screen can offer (launcher_screen.hpp draws it).
+struct LauncherFacts {
+    bool module_selectable = false;  // the user may supply the game module: it is neither built in nor built from the ROM
+    bool module_installed = false;   // a game module file is where the application looks
+    bool module_refused = false;     // ... and the last start failed because of it (ABI, layout or ROM mismatch)
+    bool rom_stored = false;         // the application keeps a ROM from an earlier choice
+};
+// Progress of a ROM or module import, or of building the game module, as the host polls it.
+struct ImportEvent {
+    enum class Kind {
+        working,  // still going; `text` says what
+        started,  // the game was started
+        failed,   // `text` is the error
+        notice,   // done, but the game is not started yet; `text` says what is missing
+    } kind = Kind::working;
+    std::string text;
+};
+// A click target of the start screen, in the design space (centre and size, bottom-left origin).
+struct LauncherButton {
+    enum class Action { choose_rom, choose_module } action = Action::choose_rom;
+    std::string label;
+    double x = 0, y = 0, width = 0, height = 0;
+    bool contains(double px, double py) const {
+        return std::abs(px - x) <= width / 2 && std::abs(py - y) <= height / 2;
+    }
+};
+inline std::optional<LauncherButton::Action> launcher_hit(const std::vector<LauncherButton>& buttons, double x, double y) {
+    for (const auto& button : buttons) if (button.contains(x, y)) return button.action;
+    return std::nullopt;
+}
+
 // The native session surface the scripts call (formerly the `sc64` Lua module).
 class NativeApi {
 public:
@@ -63,11 +97,16 @@ public:
     // Returns an error message, or nothing on success.
     virtual std::optional<std::string> load_rom(const std::string& path) = 0;
     virtual std::optional<std::string> load_bundled_rom() = 0;
-    // Starts an asynchronous ROM choice; its result arrives through poll_rom().
+    // Starts an asynchronous ROM choice; its result arrives through poll_import().
     virtual std::optional<std::string> choose_rom() = 0;
-    // Nothing pending, or a completed import: an empty string means success.
-    virtual std::optional<std::string> poll_rom() = 0;
+    // The same for a game module; it is only offered when LauncherFacts::module_selectable.
+    virtual std::optional<std::string> choose_module() { return "Choosing a game module is not supported"; }
+    // Nothing pending, or the progress or outcome of a choice or of building the game module.
+    virtual std::optional<ImportEvent> poll_import() = 0;
     virtual std::optional<std::string> stored_rom() = 0;
+    virtual LauncherFacts launcher_facts() { return {}; }
+    // The choice whose picker is open (or whose file is being copied), for the start screen's button.
+    virtual std::optional<LauncherButton::Action> choosing() { return std::nullopt; }
     virtual void pause(bool paused) = 0;
     virtual void set_pad(int player, unsigned buttons, double x, double y) = 0;
     virtual bool navigate_minimap(double x, double y, double context, double field) = 0;
@@ -76,7 +115,12 @@ public:
     virtual void set_haptics(bool enabled) = 0;
     virtual void exit(int code) = 0;
     virtual std::pair<double, double> window_size() = 0;
+    // Structured telemetry and input traces: DEBUG, written when the log level is debug.
     virtual void log(const std::string& line) = 0;
+    // Whether log() writes anything: the telemetry snapshot is only built then.
+    virtual bool tracing() { return true; }
+    // A failure the user should see in the log at the default level.
+    virtual void warn(const std::string& line) { log(line); }
 };
 
 // Durable storage of the diagnostic touch-pad layout.
@@ -101,9 +145,18 @@ private:
 struct Shared {
     input::GestureState gestures;
     input::touch_pad::State pad;
-    std::string message = "StarCraft 64\n\nClick / tap or press O to choose your NTSC-U ROM dump.\n\n"
-        "Enter: Start   X: A   C: B   Z: trigger\nArrows: D-pad   WASD: analog stick\n"
-        "IJKL: C-buttons   Q/E: L/R\nP: pause";
+    // What the start screen says about the last choice or start: nothing while idle.
+    enum class Stage { idle, working, failed } stage = Stage::idle;
+    std::string message;
+    // The start screen's click targets, published by the launcher script every frame (empty while it is hidden).
+    std::vector<LauncherButton> buttons;
+    // Feedback of those buttons: the mouse over the window (design space), and the button under a held press.
+    // A press stays visible for a moment even when it is a short click; `press_released` marks the end of the contact.
+    std::optional<std::pair<double, double>> pointer;
+    std::optional<LauncherButton::Action> pressed;
+    bool press_released = false;
+    std::string press_owner;  // "mouse", the id of the touch, or empty for a key
+    double press_started = 0;
     bool user_paused = false;
 };
 
@@ -143,6 +196,7 @@ public:
     bool paused = false;
 private:
     void set_user_pause(bool value);
+    void report(Shared::Stage stage, std::string text);
     bool debug() const;
     Shared& shared_;
     NativeApi& native_;
@@ -159,7 +213,7 @@ private:
 
 // One drawable overlay element in design coordinates (centre, size).
 struct OverlayNode {
-    enum class Kind { box, text } kind = Kind::box;
+    enum class Kind { box, text, image } kind = Kind::box;  // image: the launcher icon, square, drawn uniformly
     bool enabled = true;
     double x = 0, y = 0, width = 1, height = 1, rotation = 0, scale = 1;
     std::array<double, 4> color{1, 1, 1, 1};
@@ -202,7 +256,7 @@ private:
     std::map<std::string, ButtonNodes, std::less<>> buttons_;
 };
 
-// Status, error and pause text (former status.gui_script).
+// Error and pause text of a running game (former status.gui_script). Before the first frame the launcher screen speaks.
 class StatusScript {
 public:
     StatusScript(Shared& shared, NativeApi& native) : shared_(shared), native_(native) {}

@@ -56,8 +56,11 @@ public:
     std::optional<std::string> load_rom(const std::string& path) override;
     std::optional<std::string> load_bundled_rom() override;
     std::optional<std::string> choose_rom() override;
-    std::optional<std::string> poll_rom() override;
+    std::optional<std::string> choose_module() override;
+    std::optional<ImportEvent> poll_import() override;
     std::optional<std::string> stored_rom() override;
+    LauncherFacts launcher_facts() override;
+    std::optional<LauncherButton::Action> choosing() override;
     void pause(bool paused) override;
     void set_pad(int player, unsigned buttons, double x, double y) override;
     bool navigate_minimap(double x, double y, double context, double field) override;
@@ -67,6 +70,8 @@ public:
     void exit(int code) override;
     std::pair<double, double> window_size() override;
     void log(const std::string& line) override;
+    void warn(const std::string& line) override;
+    bool tracing() override;
 
 private:
     void apply_pause();
@@ -75,9 +80,14 @@ private:
     void restore_cursor();
     void reset_feedback();
     void load_probe_case();
+    // The module a user picked, installed; then the stored ROM starts the game when there is one.
+    ImportEvent import_module(const std::string& path);
     const Config& config_;
     Window window_;
     std::string storage_;
+    // Looking at the disk every frame is wasteful: the facts are read once and again after anything was imported.
+    std::optional<LauncherFacts> facts_;
+    bool module_failed_ = false;  // the last start failed because of the game module
     unsigned width_ = 0, height_ = 0;
     std::uint64_t presented_ = 0, upload_bytes_ = 0;
     double software_ms_ = 0, software_service_ms_ = 0;

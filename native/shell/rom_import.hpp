@@ -5,8 +5,9 @@
 #include <utility>
 
 namespace sc64::desktop {
-// The caller serializes this state with the Android callback mutex. A completed
-// import remains busy until take() transfers file ownership to the engine.
+// Asynchronous import of a file the user picked (a ROM dump or a game module). The caller serializes this
+// state with the Android callback mutex. A completed import remains busy until take() transfers file
+// ownership to the engine.
 class RomImportState {
 public:
     std::error_code initialize(const std::filesystem::path& storage) {
@@ -26,19 +27,20 @@ public:
         return first_error;
     }
     bool alive() const { return alive_; }
+    bool busy() const { return busy_; }
     bool begin() {
         if (!alive_ || busy_) return false;
         busy_ = true; return true;
     }
     void cancel() { busy_ = false; }
-    std::error_code complete(Sc64RomSelection result) {
+    std::error_code complete(Sc64Selection result) {
         if (!alive_) { busy_ = false; return remove_owned(result.path); }
         auto error = remove_owned(result_.path);
         result_ = std::move(result);
         busy_ = !result_.path.empty() || !result_.error.empty();
         return error;
     }
-    Sc64RomSelection take() {
+    Sc64Selection take() {
         auto result = std::exchange(result_, {});
         if (!result.path.empty() || !result.error.empty()) busy_ = false;
         return result;
@@ -66,7 +68,7 @@ private:
         return error;
     }
     std::filesystem::path root_;
-    Sc64RomSelection result_;
+    Sc64Selection result_;
     bool alive_ = false, busy_ = false;
 };
 }

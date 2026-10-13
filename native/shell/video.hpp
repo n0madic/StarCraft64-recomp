@@ -33,14 +33,16 @@ private:
 class Video {
 public:
     ~Video();
-    void create(SDL_Window* window, const std::string& driver, const std::string& font);
+    // `icon` is a PNG for the start screen; without it (or if it cannot be read) the screen has no icon.
+    void create(SDL_Window* window, const std::string& driver, const std::string& font, const std::string& icon = {});
+    bool has_icon() const { return icon_ != nullptr; }
     void destroy();
     // Recreates device objects after SDL_EVENT_RENDER_DEVICE_RESET.
     void reset();
     void upload(const Native::Upload& image);
-    // One frame: black clear, Fit image, overlay (skipped while probing).
+    // One frame: black clear, Fit image, overlay, start screen and status text (all skipped while probing).
     void draw(bool image_visible, unsigned width, unsigned height, const std::vector<OverlayNode>* overlay,
-              const OverlayNode* status);
+              const std::vector<OverlayNode>* start_screen, const OverlayNode* status);
     Readback readback() const;
     void present();
     std::string name() const;
@@ -48,11 +50,14 @@ public:
 private:
     void ensure_texture(unsigned width, unsigned height);
     void box(const OverlayNode& node, double sx, double sy, int height) const;
+    void draw_nodes(const std::vector<OverlayNode>& nodes, double sx, double sy, int height);
+    void load_icon();
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     SDL_Texture* texture_ = nullptr;
     unsigned texture_width_ = 0, texture_height_ = 0;
-    std::string font_path_;
+    std::string font_path_, icon_path_;
+    SDL_Texture* icon_ = nullptr;
     Font font_;
     std::optional<Native::Upload> last_;
 };

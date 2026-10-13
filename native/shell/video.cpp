@@ -139,8 +139,8 @@ void Font::draw(SDL_Renderer* renderer, const std::string& text, float cx, float
 
 Video::~Video() { destroy(); }
 
-void Video::create(SDL_Window* window, const std::string& driver, const std::string& font) {
-    window_ = window; font_path_ = font;
+void Video::create(SDL_Window* window, const std::string& driver, const std::string& font, const std::string& icon) {
+    window_ = window; font_path_ = font; icon_path_ = icon;
     SDL_PropertiesID properties = SDL_CreateProperties();
     SDL_SetPointerProperty(properties, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, window);
     if (!driver.empty()) SDL_SetStringProperty(properties, SDL_PROP_RENDERER_CREATE_NAME_STRING, driver.c_str());
@@ -154,10 +154,27 @@ void Video::create(SDL_Window* window, const std::string& driver, const std::str
     if (!requested.empty() && SDL_strcasecmp(requested.c_str(), name().c_str()) != 0)
         log::warning("SC64 requested renderer %s unavailable; using %s", requested.c_str(), name().c_str());
     font_.load(renderer_, font_path_);
+    load_icon();
+}
+
+// The icon is a nicety: a missing or unreadable file only leaves the start screen without it.
+void Video::load_icon() {
+    if (icon_) SDL_DestroyTexture(icon_);
+    icon_ = nullptr;
+    if (icon_path_.empty()) return;
+    SDL_Surface* surface = SDL_LoadPNG(icon_path_.c_str());
+    if (!surface) { log::debug("Start screen icon %s: %s", icon_path_.c_str(), SDL_GetError()); return; }
+    icon_ = SDL_CreateTextureFromSurface(renderer_, surface);
+    SDL_DestroySurface(surface);
+    if (!icon_) { log::debug("Start screen icon texture: %s", SDL_GetError()); return; }
+    SDL_SetTextureScaleMode(icon_, SDL_SCALEMODE_LINEAR);
+    SDL_SetTextureBlendMode(icon_, SDL_BLENDMODE_BLEND);
 }
 
 void Video::destroy() {
     font_.release();
+    if (icon_) SDL_DestroyTexture(icon_);
+    icon_ = nullptr;
     if (texture_) SDL_DestroyTexture(texture_);
     texture_ = nullptr; texture_width_ = texture_height_ = 0;
     if (renderer_) SDL_DestroyRenderer(renderer_);
@@ -168,6 +185,7 @@ void Video::reset() {
     if (texture_) SDL_DestroyTexture(texture_);
     texture_ = nullptr; texture_width_ = texture_height_ = 0;
     font_.load(renderer_, font_path_);
+    load_icon();
     if (last_) upload(*last_);
 }
 
@@ -217,8 +235,30 @@ void Video::box(const OverlayNode& node, double sx, double sy, int height) const
     SDL_RenderGeometry(renderer_, nullptr, vertices.data(), 4, indices, 6);
 }
 
+void Video::draw_nodes(const std::vector<OverlayNode>& nodes, double sx, double sy, int height) {
+    const float text_scale = float(std::min(sx, sy) * font_design_size);
+    for (const auto& node : nodes) {
+        if (!node.enabled) continue;
+        switch (node.kind) {
+        case OverlayNode::Kind::box: box(node, sx, sy, height); break;
+        case OverlayNode::Kind::text:
+            font_.draw(renderer_, node.text, float(node.x * sx), float(height - node.y * sy), text_scale * float(node.scale),
+                       node.color, node.line_break ? float(node.width * sx) : 0);
+            break;
+        case OverlayNode::Kind::image: {
+            if (!icon_) break;
+            // The sizes of an image node already account for the stretch; the texture is square.
+            const float w = float(node.width * sx), h = float(node.height * sy);
+            const SDL_FRect target{float(node.x * sx) - w / 2, float(height - node.y * sy) - h / 2, w, h};
+            SDL_RenderTexture(renderer_, icon_, nullptr, &target);
+            break;
+        }
+        }
+    }
+}
+
 void Video::draw(bool image_visible, unsigned width, unsigned height, const std::vector<OverlayNode>* overlay,
-                 const OverlayNode* status) {
+                 const std::vector<OverlayNode>* start_screen, const OverlayNode* status) {
     const auto [w, h] = size();
     SDL_SetRenderViewport(renderer_, nullptr);
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
@@ -232,18 +272,9 @@ void Video::draw(bool image_visible, unsigned width, unsigned height, const std:
     if (!overlay) return;
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     const double sx = w / design_width, sy = h / design_height;
-    const float text_scale = float(std::min(sx, sy) * font_design_size);
-    const auto text = [&](const OverlayNode& node, float wrap) {
-        font_.draw(renderer_, node.text, float(node.x * sx), float(h - node.y * sy), text_scale * float(node.scale),
-                   node.color, wrap);
-    };
-    for (const auto& node : *overlay) {
-        if (!node.enabled) continue;
-        if (node.kind == OverlayNode::Kind::box) box(node, sx, sy, int(h));
-        else text(node, 0);
-    }
-    if (status && status->enabled && !status->text.empty())
-        text(*status, status->line_break ? float(status->width * sx) : 0);
+    draw_nodes(*overlay, sx, sy, int(h));
+    if (start_screen) draw_nodes(*start_screen, sx, sy, int(h));
+    if (status && status->enabled && !status->text.empty()) draw_nodes({*status}, sx, sy, int(h));
 }
 
 Readback Video::readback() const {

@@ -26,7 +26,7 @@ for the research, recompilation, renderer and input tools.
 make help
 make doctor                      # = python tools/sc64.py doctor
 make build                       # package for this host
-make run                         # click / O to choose your own ROM
+make run                         # the start screen: Select ROM (or O) to choose your own ROM
 make run ROM="/path/to/your.z64"   # or provide it explicitly
 make test
 

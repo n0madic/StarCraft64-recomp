@@ -2319,7 +2319,7 @@ use the launcher APK and its package. The APK is still signed with the personal 
 
 **Consequences:** The default `make build-android` is unchanged. The launcher APK is a personal artifact
 until the notices of ADR-088 (GPL texts, SOURCE.txt) and a distribution key exist (D-063). There is no
-in-app import of the module (no file picker for it) and no in-app build; a computer with the ROM is
+in-app build (the module is picked on the start screen since ADR-091, but not built there); a computer with the ROM is
 required to make the module. Only one module is kept per app and it is not rebuilt when the application
 changes: an ABI change is reported by the loader as "rebuild the game module".
 
@@ -2355,3 +2355,66 @@ struct layout checks guard against mistakes, not against an attacker with write 
   `content_audit.game_code_linked`. `$ANDROID_LAUNCHER` selects the APK of install/run/smoke/audio/check-apk only;
   `build-android` and `build-android-opengles` always build the personal APK. `push-android-module` tells an adb failure from a
   missing folder. Tests tie `kAndroidApi`, the target list and the application ID copies to their Python counterparts.
+
+## ADR-091 — Start screen with icon, title and choice buttons; the game module can be picked like the ROM (ACCEPTED)
+
+**Context:** Before the first frame the shell showed one block of small monospace text on black, which carried every
+message (prompt, key hints, progress, errors with long paths), often without saying whose it was. The Android launcher
+(ADR-090) also needed `adb push` for the game module, which a user without a computer at hand cannot do.
+
+**Decision:**
+- A new SDL-free `LauncherScript` (`native/shell/launcher_screen.{hpp,cpp}`) owns the screen until the game presents its first
+  frame. `describe_launcher` turns the launch state (`Shared::Stage` idle/working/failed plus the message) and the facts
+  (`LauncherFacts`: module selectable / installed, ROM kept) into a headline, details and choices; `layout_launcher` places them
+  in the 960x720 design space and corrects sizes by the window aspect so that buttons and icon are not stretched. `Video` draws the
+  nodes (a new `image` kind for the icon, loaded with `SDL_LoadPNG` from `launcher-icon.png` beside the font; without the file the
+  screen simply has no icon). Key hints are gone; O (ROM) and M (module) remain as keys.
+- Only the buttons choose now (a click anywhere no longer opens the ROM picker). The buttons are published in `Shared::buttons`
+  and hit-tested by `HostScript`.
+- The icon is the neutral SC64 icon in launchers (desktop packages and the Android launcher APK, ADR-088) and the application's own
+  icon in personal builds (so a personal build does not show anything the launcher could not).
+- "Select game module" is offered only where the module is not built in and not built from the ROM: not in the static APK, not in
+  a package with `sc64_setup` (`GameBuild::available()`). The file is copied by the same import machinery as a ROM
+  (`sc64_choose_file(Sc64Pick)`), then `game::import_module` moves it next to the module, loads it once (ABI, layout and ROM SHA-1
+  checks; the handle is released), and only then replaces `<storage>/game/<module>` in one rename. A refused file changes nothing.
+  A kept ROM starts the game right away; otherwise the screen says to choose the ROM. The import is refused once a module is loaded
+  in the process (restart to change it).
+- Buttons react: the mouse over one lightens it (`Shared::pointer`, from `SDL_EVENT_MOUSE_MOTION`), a press fills it with gold for the
+  contact and at least `pressed_look_seconds` (a key press flashes it the same way), and it stays filled while its picker is open or
+  its file is being copied (`NativeApi::choosing`, from `sc64_pending_pick`).
+- Details of the review of this change: a press ends with the contact that made it (`Shared::press_owner`), when its picker opens
+  (`choosing()` takes over the look), or when the window loses the focus, so a release swallowed by the system picker cannot leave a
+  button stuck. A module that is installed but refused (`LauncherFacts::module_refused`, set when the start failed with a
+  `ModuleError`) makes the module button the primary one. A notice such as "module installed, now choose your ROM" is the headline;
+  details are cut to ten wrapped lines. `load_file` unloads a module it refuses (the loader matches loaded objects by name, so a
+  corrected module at the same path would otherwise return the refused image). The picked copy stays writable until it is accepted
+  and is made read-only just before the rename (Windows cannot delete a read-only file). Before any of its code runs, the file must
+  mention `sc64_module_init`, which keeps an unrelated library from being loaded; it is a guard against mistakes, not against a
+  hostile file. The sequence after a pick is `module_import_event`, tested without a session.
+- `NativeApi::poll_rom` became `poll_import` and says whether an event is progress, a start, an error or a notice, instead of
+  an ambiguous string.
+
+**Consequences:** On Android 10 and older the picker works as well (the file is the user's own choice and is copied into private
+storage), so the "no import below Android 11" rule applies to the `adb push` folder only. Choosing a module executes its code (the
+load check runs its initializer), the same trust as `adb push`: the user's own file (a file that does not mention the entry point is refused before it is loaded). The staged-module path (`install_staged`)
+is unchanged and still does not validate before replacing. Not verified on a device (D-062); the screen was rendered
+off-screen for several states and window shapes.
+
+## ADR-092 — Telemetry and traces are DEBUG; `sc64.log_level` (ACCEPTED)
+
+**Context:** The engine log printed the full telemetry JSON every five seconds, the window lifecycle events and all input
+traces as `INFO`, so an ordinary `make run` log was mostly evidence for the checkers, not messages for a person.
+
+**Decision:** `log.hpp` has levels (debug, info, warning, error), default info, set with `--config=sc64.log_level=<level>`
+(an unknown value is reported and info is kept). The telemetry line, `NativeApi::log` traces (`ui_click`, `pad`, `input`, ...),
+`SC64 lifecycle event N` (N = `WindowEvent`: 0 focus lost, 1 focus gained, 2 iconified, 3 restored, 4 resized) and
+`SC64 Android suspended=...` are DEBUG; `NativeApi::warn` carries the ROM load failures as warnings. The checkers read these
+lines, so they ask for debug: `tools/desktop/run.py` passes `debug` for timed or traced runs (`--seconds`, `--debug-input`,
+traces, GPU probe; `--log-level` overrides) and `info` for an interactive run, and the APK's packaged `config.ini` sets
+`sc64.log_level = debug` (logcat filters by priority itself).
+
+The telemetry snapshot is built only while it is written (`NativeApi::tracing`), and a failed save of the touch layout is a warning,
+not a trace. `run.py` treats a run as interactive only when it has no `--seconds`, `--inputs`, pause/resume, probe or trace option.
+
+**Consequences:** `make run` is quiet; an evidence run's log is unchanged except for the `DEBUG:` prefix, which the checkers
+(they look for `SC64 {` anywhere in a line) do not depend on. Other consumers of those lines must request debug.

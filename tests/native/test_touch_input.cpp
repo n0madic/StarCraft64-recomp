@@ -6,6 +6,7 @@
 // fresh script object over it. Lua nil indexing errors are mirrored with
 // std::optional::value() and container at() so a missing value still fails.
 #include "scripts.hpp"
+#include "launcher_screen.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -57,6 +58,11 @@ struct MockNative final : NativeApi {
     int selected = 0;
     std::optional<std::string> load_path, stored;
     std::optional<bool> poll_result;
+    std::optional<LauncherButton::Action> picking;  // the picker that is open, for choosing()
+    bool trace = true;
+    std::vector<std::string> warnings;
+    int module_selected = 0;
+    LauncherFacts facts;
     int bundled_calls = 0;
     std::optional<std::string> bundled_error;
     std::optional<std::array<double, 4>> cursor_hidden;
@@ -68,11 +74,16 @@ struct MockNative final : NativeApi {
     std::optional<std::string> load_rom(const std::string& path) override { load_path = path; return nullopt; }
     std::optional<std::string> load_bundled_rom() override { ++bundled_calls; return bundled_error; }
     std::optional<std::string> choose_rom() override { ++selected; return nullopt; }
-    std::optional<std::string> poll_rom() override {
+    std::optional<std::string> choose_module() override { ++module_selected; return nullopt; }
+    LauncherFacts launcher_facts() override { return facts; }
+    std::optional<LauncherButton::Action> choosing() override { return picking; }
+    bool tracing() override { return trace; }
+    void warn(const std::string& line) override { warnings.push_back(line); logs.push_back(line); }
+    std::optional<ImportEvent> poll_import() override {
         if (!poll_result) return nullopt;
         const bool ok = *poll_result;
         poll_result.reset();
-        return ok ? std::string() : std::string("invalid ROM");
+        return ok ? ImportEvent{ImportEvent::Kind::started, {}} : ImportEvent{ImportEvent::Kind::failed, "invalid ROM"};
     }
     std::optional<std::string> stored_rom() override { return stored; }
     void pause(bool paused) override { pause_calls.push_back(paused); }
@@ -258,6 +269,7 @@ int main() {
         store.save_result = MockStore::Save::fail;
         scene.on_input("touch_edit", pressed_event());
         CHECK(shared.pad.editing && has(scene.notice, "failed"));
+        CHECK(native.warnings.size() == 1 && has(native.warnings[0], "Layout save failed"));  // a failure is not a trace
         store.save_result = MockStore::Save::raise;
         scene.on_input("touch_edit", pressed_event());
         CHECK(shared.pad.editing && has(scene.notice, "disk full"));
@@ -907,30 +919,102 @@ int main() {
     }
     std::puts("Android GUI double-tap routing suppresses selection and duplicate mouse input");
 
-    // The real host imports by click/multitouch and handles asynchronous SAF output.
+    // The real host imports by a click or tap on a start-screen button and handles asynchronous SAF output.
     // choose_rom() only starts the picker in both versions; its result arrives
-    // through poll_rom() (empty string = success, otherwise the error message).
+    // through poll_import() (started, or the error message).
     shared.pad = {}; shared.gestures = {};
-    guest.running = false; guest.paused = false; guest.input_active = true;
+    guest.running = false; guest.paused = false; guest.input_active = true; guest.presented = 0; guest.error.clear();
     native.selected = 0; native.load_path.reset();
     native.stored = "private/sc64-ntsc-u.z64";
     {
         HostScript importer(shared, native, config);
         importer.init();
         CHECK(native.load_path == "private/sc64-ntsc-u.z64");
-        importer.on_input("touch_mouse", pressed_event()); CHECK(native.selected == 1);
-        { InputEvent e; e.touch.push_back(Touch{.id = "1", .pressed = true}); importer.on_input("touch_multi", e); }
+        // Only the buttons choose; the rest of the start screen does nothing.
+        LauncherScript start(shared, native, false);
+        start.update();
+        CHECK(shared.stage == Shared::Stage::working && shared.buttons.empty());  // the stored ROM is being started
+        shared.stage = Shared::Stage::idle; shared.message.clear();
+        start.update();
+        CHECK(shared.buttons.size() == 1 && shared.buttons[0].action == LauncherButton::Action::choose_rom);
+        const auto rom_button = shared.buttons[0];
+        auto at = [](double x, double y) { InputEvent e = pressed_event(); e.x = x; e.y = y; return e; };
+        importer.on_input("touch_mouse", at(10, 10)); CHECK(native.selected == 0);
+        importer.on_input("touch_mouse", pressed_event()); CHECK(native.selected == 0);  // no position
+        importer.on_input("touch_mouse", at(rom_button.x, rom_button.y)); CHECK(native.selected == 1);
+        // The pressed look holds while the contact does and for a moment after a short click.
+        CHECK(shared.pressed == LauncherButton::Action::choose_rom);
+        importer.update(1.0); CHECK(shared.pressed && !shared.press_released);
+        { InputEvent e; e.released = true; importer.on_input("touch_mouse", e); }
+        importer.update(0.001); CHECK(!shared.pressed);  // held for long: the look ends with the contact
+        importer.on_input("touch_mouse", at(rom_button.x, rom_button.y)); CHECK(native.selected == 2);
+        { InputEvent e; e.released = true; importer.on_input("touch_mouse", e); }
+        importer.update(pressed_look_seconds / 3); CHECK(shared.pressed);  // a quick click is still seen
+        importer.update(pressed_look_seconds); CHECK(!shared.pressed);
+        native.selected = 1;
+        importer.on_input("touch_mouse", at(rom_button.x + rom_button.width / 2 + 1, rom_button.y)); CHECK(native.selected == 1);
+        { InputEvent e; e.touch.push_back(Touch{.id = "1", .pressed = true, .x = rom_button.x, .y = rom_button.y}); importer.on_input("touch_multi", e); }
         CHECK(native.selected == 2);
-        { InputEvent e; e.touch.push_back(Touch{.id = "1", .released = true}); importer.on_input("touch_multi", e); }
+        { InputEvent e; e.touch.push_back(Touch{.id = "1", .pressed = true, .x = 10, .y = 10}); importer.on_input("touch_multi", e); }
         CHECK(native.selected == 2);
+        { InputEvent e; e.touch.push_back(Touch{.id = "1", .released = true, .x = rom_button.x, .y = rom_button.y}); importer.on_input("touch_multi", e); }
+        CHECK(native.selected == 2);
+        importer.on_input("open_rom", pressed_event()); CHECK(native.selected == 3);
+        CHECK(shared.pressed && shared.press_released);  // a key press flashes the button for a moment
+        importer.update(pressed_look_seconds * 2); CHECK(!shared.pressed);
+        // Only the finger that pressed ends the look; another finger lifting does not.
+        { InputEvent e; e.touch.push_back(Touch{.id = "7", .pressed = true, .x = rom_button.x, .y = rom_button.y}); importer.on_input("touch_multi", e); }
+        CHECK(shared.pressed && shared.press_owner == "7");
+        { InputEvent e; e.touch.push_back(Touch{.id = "8", .released = true}); importer.on_input("touch_multi", e); }
+        importer.update(1.0); CHECK(shared.pressed && !shared.press_released);
+        { InputEvent e; e.touch.push_back(Touch{.id = "7", .released = true}); importer.on_input("touch_multi", e); }
+        importer.update(1.0); CHECK(!shared.pressed);
+        // A release the picker swallowed cannot leave the look stuck: once the picker is open `choosing()` shows it.
+        importer.on_input("touch_mouse", at(rom_button.x, rom_button.y));
+        CHECK(shared.pressed);
+        native.picking = LauncherButton::Action::choose_rom;
+        importer.update(1.0 / 60); CHECK(!shared.pressed);
+        native.picking.reset();
+        // Losing the focus ends a press whose release may never arrive.
+        importer.on_input("touch_mouse", at(rom_button.x, rom_button.y));
+        CHECK(shared.pressed);
+        importer.window_event(WindowEvent::focus_lost); CHECK(!shared.pressed);
+        native.selected = 3;
+        importer.on_input("open_module", pressed_event()); CHECK(native.module_selected == 0);  // nothing to choose here
         native.poll_result = false; importer.update(1.0 / 60);
-        CHECK(shared.message == "invalid ROM");
+        CHECK(shared.message == "invalid ROM" && shared.stage == Shared::Stage::failed);
         native.poll_result = true; importer.update(1.0 / 60);
-        CHECK(shared.message == "Starting game...");
-        guest.running = true; importer.on_input("touch_mouse", pressed_event()); CHECK(native.selected == 2);
+        CHECK(shared.message == "Starting game..." && shared.stage == Shared::Stage::working);
+        start.update();
+        CHECK(shared.buttons.empty());  // the game is being started
+        // Where the application cannot build the module itself, the user supplies it with a second button.
+        shared.stage = Shared::Stage::idle; shared.message.clear();
+        native.facts.module_selectable = true;
+        start.update();
+        CHECK(shared.buttons.size() == 2 && shared.buttons[1].action == LauncherButton::Action::choose_module);
+        importer.on_input("touch_mouse", at(shared.buttons[1].x, shared.buttons[1].y)); CHECK(native.module_selected == 1);
+        importer.on_input("open_module", pressed_event()); CHECK(native.module_selected == 2);
+        guest.running = true;
+        importer.on_input("touch_mouse", at(rom_button.x, rom_button.y)); CHECK(native.selected == 3);
+        importer.on_input("open_module", pressed_event()); CHECK(native.module_selected == 2);
+        guest.running = false; native.facts = {};
         importer.final();
     }
-    std::puts("ROM click/touch import, stored-ROM restart and asynchronous error routing passed");
+    std::puts("Start-screen ROM/module choice, stored-ROM restart and asynchronous error routing passed");
+
+    // The telemetry snapshot is only built (and its audio timing consumed) while it is written.
+    {
+        auto telemetry_lines = [&] { return std::count_if(native.logs.begin(), native.logs.end(), [](const std::string& line) { return line.starts_with("SC64 {"); }); };
+        native.logs.clear(); native.trace = false;
+        HostScript quiet(shared, native, config);
+        quiet.init(); quiet.update(1.0 / 60); quiet.update(6);
+        CHECK(telemetry_lines() == 0);
+        native.trace = true;
+        quiet.update(6);
+        CHECK(telemetry_lines() == 1);
+        quiet.final();
+    }
+    std::puts("Telemetry is built only while it is written");
 
     // Bundled APK startup takes priority over an older imported ROM and surfaces
     // verification/read errors without opening the picker or using the disk path.

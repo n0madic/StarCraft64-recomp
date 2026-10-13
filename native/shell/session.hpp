@@ -100,9 +100,13 @@ public:
     void stop();
     void fail(const std::string& message);
     std::string error();
-    // While the game module is being built from the ROM (ADR-087): the progress or error text, "" once
-    // the game has been started, nothing when no build was requested. Call from the main thread.
-    std::optional<std::string> poll_build();
+    // While the game module is being built from the ROM (ADR-087): the progress or error text, or that the game
+    // has been started; nothing when no build was requested. Call from the main thread.
+    struct BuildProgress {
+        enum class State { running, started, failed } state = State::running;
+        std::string text;
+    };
+    std::optional<BuildProgress> poll_build();
     FrameMailbox mailbox;
     ScanoutMailbox scanout;
     CpuScanouts cpu_scanouts;

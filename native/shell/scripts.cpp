@@ -218,6 +218,8 @@ void HostScript::set_user_pause(bool value) {
 }
 
 void HostScript::window_event(WindowEvent event) {
+    // A contact that began before the window lost the focus may never be reported as ended.
+    if (event == WindowEvent::focus_lost || event == WindowEvent::iconified) shared_.pressed.reset();
     if (event == WindowEvent::focus_lost || event == WindowEvent::iconified || event == WindowEvent::resized) {
         pad_state::clear(pads_);
         touch_pad::clear(shared_.pad);
@@ -272,24 +274,42 @@ void HostScript::init() {
     }
     if (!config_.string("sc64.gpu_probe").empty()) return;
     if (config_.number("sc64.bundled_rom", 0) == 1) {
-        shared_.message = "Loading bundled ROM...";
+        report(Shared::Stage::working, "Loading bundled ROM...");
         const auto error = native_.load_bundled_rom();
-        shared_.message = error ? *error : "Starting game...";
-        if (error) native_.log("SC64 bundled ROM load failed: " + *error);
+        if (error) report(Shared::Stage::failed, *error); else report(Shared::Stage::working, "Starting game...");
+        if (error) native_.warn("SC64 bundled ROM load failed: " + *error);
         return;
     }
     auto path = config_.string("sc64.rom");
     if (path.empty()) path = native_.stored_rom().value_or("");
     if (path.empty()) return;
-    shared_.message = "Loading ROM...";
+    report(Shared::Stage::working, "Loading ROM...");
     const auto error = native_.load_rom(path);
-    shared_.message = error ? *error : "Starting game...";
-    if (error) native_.log("SC64 load failed: " + *error);
+    if (error) report(Shared::Stage::failed, *error); else report(Shared::Stage::working, "Starting game...");
+    if (error) native_.warn("SC64 load failed: " + *error);
+}
+
+void HostScript::report(Shared::Stage stage, std::string text) {
+    shared_.stage = stage;
+    shared_.message = std::move(text);
 }
 
 void HostScript::update(double dt) {
     elapsed += dt;
-    if (const auto result = native_.poll_rom()) shared_.message = result->empty() ? "Starting game..." : *result;
+    // A press shows for at least a moment, so that a quick click is seen. Once its picker is open the button keeps
+    // that look through NativeApi::choosing(), so a release lost to the picker's window cannot leave it stuck.
+    if (shared_.pressed && (native_.choosing() ||
+                            (shared_.press_released && elapsed - shared_.press_started >= pressed_look_seconds)))
+        shared_.pressed.reset();
+    if (const auto event = native_.poll_import()) {
+        using Kind = ImportEvent::Kind;
+        switch (event->kind) {
+        case Kind::working: report(Shared::Stage::working, event->text); break;
+        case Kind::started: report(Shared::Stage::working, "Starting game..."); break;
+        case Kind::failed: report(Shared::Stage::failed, event->text); break;
+        case Kind::notice: report(Shared::Stage::idle, event->text); break;
+        }
+    }
     const double pause_at = config_.number("sc64.pause_at", 0), resume_at = config_.number("sc64.resume_at", 0);
     if (pause_at > 0 && elapsed >= pause_at && !test_paused_) { test_paused_ = true; set_user_pause(true); }
     if (resume_at > 0 && elapsed >= resume_at && !test_resumed_) { test_resumed_ = true; set_user_pause(false); }
@@ -497,6 +517,7 @@ void HostScript::update(double dt) {
         }
         native_.set_pad(player, out.buttons, out.x, out.y);
     }
+    if (elapsed >= next_log_ && !native_.tracing()) next_log_ = elapsed + 5;  // nothing writes the snapshot
     if (elapsed >= next_log_) {
         nlohmann::json logged = native_.telemetry();
         logged["script_seconds"] = elapsed;
@@ -544,12 +565,36 @@ void HostScript::on_input(const std::string& id, const InputEvent& action) {
     // Before a game runs there is nothing to pause; a stored manual pause
     // would otherwise freeze the first frames of the next ROM.
     if (id == "pause" && action.pressed && info.running) set_user_pause(!paused);
-    bool import_pressed = action.pressed;
-    if (id == "touch_multi")
-        for (const auto& contact : action.touch) if (contact.pressed) import_pressed = true;
-    if ((id == "open_rom" || id == "touch_mouse" || id == "touch_multi") && import_pressed && !info.running) {
-        if (const auto error = native_.choose_rom()) shared_.message = *error;
+    // The end of the contact that pressed a start-screen button ends its pressed look (update() keeps it for a moment).
+    if (shared_.pressed && !shared_.press_released) {
+        if (id == "touch_mouse" && action.released && shared_.press_owner == "mouse") shared_.press_released = true;
+        if (id == "touch_multi")
+            for (const auto& contact : action.touch)
+                if (contact.released && contact.id == shared_.press_owner) shared_.press_released = true;
     }
+    // Before a game runs the start screen offers the choices; its buttons are clicks or taps, O and M are keys.
+    if (info.running) return;
+    struct Press { LauncherButton::Action action; std::string owner; bool key; };
+    std::optional<Press> press;
+    if (id == "open_rom" && action.pressed) {
+        press = Press{LauncherButton::Action::choose_rom, {}, true};
+    } else if (id == "open_module" && action.pressed && native_.launcher_facts().module_selectable) {
+        press = Press{LauncherButton::Action::choose_module, {}, true};
+    } else if (id == "touch_mouse" && action.pressed && action.x && action.y) {
+        if (const auto hit = launcher_hit(shared_.buttons, *action.x, *action.y)) press = Press{*hit, "mouse", false};
+    } else if (id == "touch_multi") {
+        for (const auto& contact : action.touch) {
+            if (!contact.pressed) continue;
+            if (const auto hit = launcher_hit(shared_.buttons, contact.x, contact.y)) { press = Press{*hit, contact.id, false}; break; }
+        }
+    }
+    if (!press) return;
+    shared_.pressed = press->action;
+    shared_.press_owner = press->owner;
+    shared_.press_started = elapsed;
+    shared_.press_released = press->key;  // a key has no contact to hold
+    const auto error = press->action == LauncherButton::Action::choose_rom ? native_.choose_rom() : native_.choose_module();
+    if (error) { report(Shared::Stage::failed, *error); shared_.pressed.reset(); }
 }
 
 void HostScript::final() {
@@ -618,7 +663,7 @@ bool GuiScript::save() {
     const auto error = store_.save(touch_layout_json(shared_.pad.layout));
     notice = error ? "Layout save failed: " + *error : "Touch layout saved";
     notice_time = 5;
-    native_.log("SC64 " + notice);
+    if (error) native_.warn("SC64 " + notice); else native_.log("SC64 " + notice);
     return !error;
 }
 
@@ -895,13 +940,15 @@ void GuiScript::final() {
 // ---------------------------------------------------------------- StatusScript
 void StatusScript::update() {
     const auto info = native_.info();
-    std::string message = shared_.message;
-    if (!info.error.empty()) message = info.error;
+    std::string message;
+    // Before the first frame the launcher screen shows the messages and errors.
+    if (info.presented <= 0) message.clear();
+    else if (!info.error.empty()) message = info.error;
     else if (info.paused && info.running) {
         // Focus loss/iconify pause independently of P; only a manual pause
         // can be resumed with P.
         message = shared_.user_paused ? "Paused \xE2\x80\x94 press P to resume" : "Paused";
-    } else if (info.presented > 0) message.clear();
+    }
     node.text = message;
 }
 }

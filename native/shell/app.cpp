@@ -3,6 +3,7 @@
 // and the audio callback run on their own threads (session.cpp, audio.cpp).
 #define SDL_MAIN_USE_CALLBACKS 1
 #include "log.hpp"
+#include "launcher_screen.hpp"
 #include "loop_watch.hpp"
 #include "native.hpp"
 #include "platform_sdl.hpp"
@@ -27,14 +28,14 @@ using namespace sc64::shell;
 
 // Keyboard bindings (former game.input_binding).
 struct KeyBinding { SDL_Scancode scancode; const char* action; };
-constexpr std::array<KeyBinding, 32> key_bindings = {{
+constexpr std::array<KeyBinding, 33> key_bindings = {{
     {SDL_SCANCODE_X, "a"}, {SDL_SCANCODE_C, "b"}, {SDL_SCANCODE_ESCAPE, "escape_back"},
     {SDL_SCANCODE_AC_BACK, "android_back"}, {SDL_SCANCODE_RETURN, "start"}, {SDL_SCANCODE_KP_ENTER, "start"},
     {SDL_SCANCODE_Z, "z"}, {SDL_SCANCODE_Q, "l"}, {SDL_SCANCODE_E, "r"},
     {SDL_SCANCODE_I, "cup"}, {SDL_SCANCODE_K, "cdown"}, {SDL_SCANCODE_J, "cleft"}, {SDL_SCANCODE_L, "cright"},
     {SDL_SCANCODE_LEFT, "dleft"}, {SDL_SCANCODE_RIGHT, "dright"}, {SDL_SCANCODE_UP, "dup"},
     {SDL_SCANCODE_DOWN, "ddown"}, {SDL_SCANCODE_A, "left"}, {SDL_SCANCODE_D, "right"}, {SDL_SCANCODE_W, "up"},
-    {SDL_SCANCODE_S, "down"}, {SDL_SCANCODE_P, "pause"}, {SDL_SCANCODE_O, "open_rom"},
+    {SDL_SCANCODE_S, "down"}, {SDL_SCANCODE_P, "pause"}, {SDL_SCANCODE_O, "open_rom"}, {SDL_SCANCODE_M, "open_module"},
     {SDL_SCANCODE_F3, "touch_toggle"}, {SDL_SCANCODE_F4, "touch_edit"}, {SDL_SCANCODE_F6, "touch_player"},
     {SDL_SCANCODE_EQUALS, "touch_larger"}, {SDL_SCANCODE_KP_PLUS, "touch_larger"},
     {SDL_SCANCODE_MINUS, "touch_smaller"}, {SDL_SCANCODE_LEFTBRACKET, "touch_opacity_down"},
@@ -68,6 +69,7 @@ struct App {
     std::unique_ptr<HostScript> host;
     std::unique_ptr<GuiScript> gui;
     std::unique_ptr<StatusScript> status;
+    std::unique_ptr<LauncherScript> launcher;
     Uint64 last_ticks = 0;
     // D-056: report main-loop gaps that age the guest UI feedback past its
     // freshness window. Lifecycle transitions stop the loop on purpose: they
@@ -156,6 +158,11 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char* argv[]) {
         }
 #endif
         app->config.parse_arguments(argc, argv);
+        if (const auto name = app->config.string("sc64.log_level"); !name.empty()) {
+            log::Level level = log::Level::info;
+            if (log::parse_level(name, level)) log::set_level(level);
+            else log::warning("Unknown sc64.log_level \"%s\" (debug, info, warning, error); using info", name.c_str());
+        }
         SDL_SetAppMetadata("StarCraft 64", "1.0", SC64_APP_ID);
         // Touch and mouse stay separate sources; the adapters own aliasing.
         SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
@@ -174,7 +181,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char* argv[]) {
         if (!app->window) { log::error("Window creation: %s", SDL_GetError()); return SDL_APP_FAILURE; }
         sc64_platform_attach_window(app->window);
         app->video.create(app->window, app->config.string("sc64.render_driver"),
-                          resource_path("DejaVuSansMono-Bold.ttf"));
+                          resource_path("DejaVuSansMono-Bold.ttf"), resource_path("launcher-icon.png"));
         auto* raw = app.get();
         app->native = std::make_unique<Native>(app->config, Native::Window{
             [raw] { return raw->pixels(); },
@@ -186,6 +193,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char* argv[]) {
         app->host = std::make_unique<HostScript>(app->shared, *app->native, app->config);
         app->gui = std::make_unique<GuiScript>(app->shared, *app->native, app->config, *app->layouts);
         app->status = std::make_unique<StatusScript>(app->shared, *app->native);
+        app->launcher = std::make_unique<LauncherScript>(app->shared, *app->native, app->video.has_icon());
         app->host->init();
         app->gui->init();
         SDL_AddEventWatch(background_watch, raw);
@@ -229,10 +237,11 @@ SDL_AppResult SDL_AppIterate(void* state) {
         app.host->update(dt);
         app.gui->update(dt);
         app.status->update();
+        app.launcher->update();
         app.loop_watch.lap(LoopWatch::scripts, SDL_GetTicksNS());
         const bool probe = app.native->probing() || !app.config.string("sc64.gpu_probe").empty();
         app.video.draw(app.native->visible(), app.native->width(), app.native->height(),
-                       probe ? nullptr : &app.gui->nodes, probe ? nullptr : &app.status->node);
+                       probe ? nullptr : &app.gui->nodes, &app.launcher->nodes, &app.status->node);
         app.native->after_render([&] { return app.video.readback(); });
         app.loop_watch.lap(LoopWatch::draw, SDL_GetTicksNS());
         app.video.present();
@@ -273,9 +282,13 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             app.dispatch(input);
             break;
         }
-        case SDL_EVENT_MOUSE_MOTION:
-            app.dispatch(app.pointer_event(std::nullopt, event->motion.x, event->motion.y));
+        case SDL_EVENT_MOUSE_MOTION: {
+            const auto motion = app.pointer_event(std::nullopt, event->motion.x, event->motion.y);
+            app.shared.pointer = std::pair{*motion.x, *motion.y};  // the start screen highlights the button under it
+            app.dispatch(motion);
             break;
+        }
+        case SDL_EVENT_WINDOW_MOUSE_LEAVE: app.shared.pointer.reset(); break;
         case SDL_EVENT_FINGER_DOWN:
         case SDL_EVENT_FINGER_MOTION:
         case SDL_EVENT_FINGER_UP:

@@ -2,6 +2,7 @@
 #include "game_module.hpp"
 #include "audio.hpp"
 #include "log.hpp"
+#include "module_import.hpp"
 #include "platform.hpp"
 #include "sha.hpp"
 #include "../runtime/minimap.hpp"
@@ -308,7 +309,7 @@ void Native::after_render(const std::function<Readback()>& readback) {
 }
 
 void Native::lifecycle(WindowEvent event) {
-    log::info("SC64 lifecycle event %d", int(event));
+    log::debug("SC64 lifecycle event %d", int(event));
     if (event == WindowEvent::focus_lost) inactive_ = true;
     if (event == WindowEvent::focus_gained) inactive_ = false;
     if (event == WindowEvent::iconified) iconified_ = true;
@@ -321,7 +322,7 @@ void Native::lifecycle(WindowEvent event) {
 void Native::suspend(bool suspended) {
     auto& s = session();
     // tools/android/run.py pairs these counters across Home/return.
-    log::info("SC64 Android suspended=%d fields=%llu tasks=%llu samples=%llu", suspended ? 1 : 0,
+    log::debug("SC64 Android suspended=%d fields=%llu tasks=%llu samples=%llu", suspended ? 1 : 0,
               static_cast<unsigned long long>(s.fields.load()), static_cast<unsigned long long>(s.tasks.load()),
               static_cast<unsigned long long>(s.samples.load()));
     s.suspend(suspended);
@@ -414,7 +415,13 @@ std::optional<std::string> Native::load_rom(const std::string& path) {
     try {
         session().load(path, storage_);
         reset_feedback();
+        module_failed_ = false;
         return std::nullopt;
+    } catch (const desktop::game::ModuleError& error) {
+        // The module is missing or refused: the start screen points at the Select game module button.
+        module_failed_ = true;
+        facts_.reset();
+        return std::string(error.what());
     } catch (const std::exception& error) { return std::string(error.what()); }
 }
 
@@ -430,27 +437,79 @@ std::optional<std::string> Native::load_bundled_rom() {
 std::optional<std::string> Native::choose_rom() {
     try {
         restore_cursor();
-        sc64_choose_rom();
+        sc64_choose_file(Sc64Pick::rom);
         return std::nullopt;
     } catch (const std::exception& error) { return std::string(error.what()); }
 }
 
-std::optional<std::string> Native::poll_rom() {
+std::optional<std::string> Native::choose_module() {
+    try {
+        restore_cursor();
+        sc64_choose_file(Sc64Pick::game_module);
+        return std::nullopt;
+    } catch (const std::exception& error) { return std::string(error.what()); }
+}
+
+ImportEvent Native::import_module(const std::string& path) {
+    auto event = module_import_event([&] { desktop::game::import_module(path, storage_); module_failed_ = false; },
+                                     [&] { return stored_rom(); }, [&](const std::string& rom) { return load_rom(rom); });
+    facts_.reset();
+    if (event.kind != ImportEvent::Kind::failed) log::info("SC64 game module imported");
+    return event;
+}
+
+std::optional<ImportEvent> Native::poll_import() {
+    using Kind = ImportEvent::Kind;
+    using State = desktop::Session::BuildProgress::State;
     if (auto build = session().poll_build()) {
-        if (build->empty()) reset_feedback();
-        return build;
+        if (build->state == State::running) return ImportEvent{Kind::working, build->text};
+        facts_.reset();
+        if (build->state == State::failed) return ImportEvent{Kind::failed, build->text};
+        reset_feedback();
+        return ImportEvent{Kind::started, {}};
     }
-    auto result = sc64_poll_rom();
+    auto result = sc64_poll_selection();
     if (result.path.empty()) {
         if (result.error.empty()) return std::nullopt;
-        return result.error;
+        facts_.reset();
+        return ImportEvent{Kind::failed, result.error};
     }
-    if (const auto error = load_rom(result.path)) result.error = *error;
+    facts_.reset();
+    ImportEvent event;
+    if (result.kind == Sc64Pick::game_module) {
+        event = import_module(result.path);
+    } else if (const auto error = load_rom(result.path)) {
+        event = {Kind::failed, *error};
+    } else {
+        event = {Kind::started, {}};
+    }
     // The import is an owned temporary copy in storage, never the user's file.
     std::error_code cleanup_error;
     std::filesystem::remove(result.path, cleanup_error);
-    if (cleanup_error) log::warning("ROM temporary cleanup: %s", cleanup_error.message().c_str());
-    return result.error;
+    if (cleanup_error) log::warning("Import temporary cleanup: %s", cleanup_error.message().c_str());
+    return event;
+}
+
+std::optional<LauncherButton::Action> Native::choosing() {
+    const auto pick = sc64_pending_pick();
+    if (!pick) return std::nullopt;
+    return *pick == Sc64Pick::rom ? LauncherButton::Action::choose_rom : LauncherButton::Action::choose_module;
+}
+
+LauncherFacts Native::launcher_facts() {
+    if (!facts_) {
+        LauncherFacts facts;
+        facts.module_selectable = desktop::game::importable() && !desktop::game::bundled();
+#if defined(SC64_HAS_SETUP)
+        // The application builds the module from the ROM itself: nothing to choose.
+        if (desktop::GameBuild::available()) facts.module_selectable = false;
+#endif
+        facts.module_installed = desktop::game::installed(storage_);
+        facts.module_refused = module_failed_ && facts.module_installed;
+        facts.rom_stored = stored_rom().has_value();
+        facts_ = facts;
+    }
+    return *facts_;
 }
 
 std::optional<std::string> Native::stored_rom() {
@@ -508,5 +567,7 @@ void Native::vibrate(int milliseconds, int amplitude) {
 void Native::set_haptics(bool enabled) { haptics_enabled_ = enabled; }
 void Native::exit(int code) { window_.exit(code); }
 std::pair<double, double> Native::window_size() { return window_.size(); }
-void Native::log(const std::string& line) { log::line(line); }
+void Native::log(const std::string& line) { log::line(line, log::Level::debug); }
+bool Native::tracing() { return log::enabled(log::Level::debug); }
+void Native::warn(const std::string& line) { log::warning("%s", line.c_str()); }
 }

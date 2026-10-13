@@ -64,6 +64,8 @@ def main() -> None:
     parser.add_argument('--debug-input', action='store_true')
     parser.add_argument('--background-input-probe', action='store_true',
                         help='Bounded recipe diagnostic only; never lifecycle acceptance')
+    parser.add_argument('--log-level', choices=('debug', 'info', 'warning', 'error'),
+                        help='Engine log level (default: debug for timed or traced runs, whose checkers read the telemetry; info for an interactive run)')
     parser.add_argument('--pause-at', type=float, default=0, help='Optional script-time lifecycle probe')
     parser.add_argument('--resume-at', type=float, default=0)
     args = parser.parse_args()
@@ -104,6 +106,10 @@ def main() -> None:
             path = path.resolve(strict=True)
             inputs[name] = {'path': str(path), 'sha256': sha256(path)}
             command.append(f'--config=sc64.{name}={path}')
+    # Telemetry, lifecycle and input traces are DEBUG lines: evidence runs need them, an interactive run does not.
+    interactive = not (args.seconds > 0 or args.debug_input or args.trace_from or args.audio_from or args.gpu_probe or
+                       args.inputs or args.pause_at or args.resume_at or args.background_input_probe)
+    command.append(f'--config=sc64.log_level={args.log_level or ("info" if interactive else "debug")}')
     if args.debug_input:
         command.append('--config=sc64.debug_input=1')
     if args.background_input_probe:

@@ -39,6 +39,18 @@ void prepare_staging();
 // <staged>/<module file> replaced the module in <storage>/game; an identical staged copy is just removed.
 // Throws ModuleError when the copy fails. A missing file is not an error.
 bool install_staged(const std::filesystem::path& staged, const std::filesystem::path& storage);
+// True when the module is a file the user can supply (not linked into the application).
+bool importable();
+// True when the application brings its module: one beside it (a personal build) or named by $SC64_GAME_MODULE.
+// Nothing is then left for the user to supply.
+bool bundled();
+// True when load() would find a module file in one of the places it looks (it is not validated here).
+bool installed(const std::filesystem::path& storage);
+// A module the user picked (any file): checked by loading it from a private copy, then installed as
+// <storage>/game/<module file> in one rename, so that a refused file leaves the module in place.
+// Throws ModuleError for a file that is not a module for this application, and once a module is loaded
+// (the process keeps using it until it restarts). `source` is consumed: moved, or removed after copying.
+void import_module(const std::filesystem::path& source, const std::filesystem::path& storage);
 // Loads and validates the module; later calls return the same one. Throws ModuleError.
 const Sc64ModuleInfo& load(const std::filesystem::path& storage);
 // Loads one specific module file (used by load() and by tests). Throws ModuleError.

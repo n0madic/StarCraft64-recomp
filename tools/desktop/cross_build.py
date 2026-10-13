@@ -148,6 +148,8 @@ def main() -> None:
         # A Linux executable cannot embed an icon; ship the PNG for launchers and desktop entries.
         if args.target == 'linux' and (icon := installed_icon('StarCraft64.png')):
             shutil.copy2(icon, staged / icon.name)
+        if icon := installed_icon('StarCraft64.png'):  # the start screen shows it
+            shutil.copy2(icon, staged / 'launcher-icon.png')
         members = sorted(staged.iterdir())
         compiler = configured_compiler(build)
         if compiler is None:

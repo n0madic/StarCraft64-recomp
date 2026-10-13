@@ -10,6 +10,12 @@ extern "C" {
 namespace sc64::desktop::game {
 std::string module_file_name() { return {}; }
 void prepare_staging() {}
+bool importable() { return false; }
+bool bundled() { return true; }
+bool installed(const std::filesystem::path&) { return true; }
+void import_module(const std::filesystem::path&, const std::filesystem::path&) {
+    throw ModuleError("This build contains the game module");
+}
 const Sc64ModuleInfo& load(const std::filesystem::path&) { return info(); }
 const Sc64ModuleInfo& info() {
     static const Sc64ModuleInfo value = {

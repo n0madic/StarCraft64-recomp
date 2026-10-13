@@ -1,4 +1,4 @@
-// SDL platform services shared by every shell target: asynchronous ROM import,
+// SDL platform services shared by every shell target: asynchronous ROM and game module import,
 // system cursor hiding and, outside Android, storage and stub peripherals.
 #include "platform.hpp"
 #include "platform_sdl.hpp"
@@ -9,6 +9,8 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
+#include <iterator>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -21,48 +23,60 @@ sc64::desktop::RomImportState imports;
 std::filesystem::path storage_root;
 std::thread import_worker;
 std::atomic<unsigned> import_counter{0};
+Sc64Pick pending_kind = Sc64Pick::rom;  // under import_mutex
+
+// A game module is a few tens of MiB; the limit only stops an unrelated huge file from filling the storage.
+constexpr std::size_t max_module_bytes = std::size_t(512) << 20;
 
 // Copy a chosen path or Android content URI into an owned temporary file. The
 // session reads it immediately and persists its own atomic copy, so no fsync.
-Sc64RomSelection copy_rom(const std::string& source, const std::filesystem::path& root) {
-    Sc64RomSelection result;
+Sc64Selection copy_selection(const std::string& source, const std::filesystem::path& root, Sc64Pick kind) {
+    Sc64Selection result;
+    result.kind = kind;
+    const bool rom = kind == Sc64Pick::rom;
+    const char* what = rom ? "ROM" : "game module";
     const auto name = "sc64-import-" + std::to_string(SDL_GetTicksNS()) + "-"
         + std::to_string(import_counter.fetch_add(1)) + ".tmp";
     const auto target = root / name;
     SDL_IOStream* input = SDL_IOFromFile(source.c_str(), "rb");
-    if (!input) { result.error = std::string("Cannot open the selected ROM: ") + SDL_GetError(); return result; }
+    if (!input) { result.error = std::string("Cannot open the selected ") + what + ": " + SDL_GetError(); return result; }
     SDL_IOStream* output = SDL_IOFromFile(target.string().c_str(), "wb");
     if (!output) {
         SDL_CloseIO(input);
-        result.error = std::string("Cannot create the ROM import file: ") + SDL_GetError();
+        result.error = std::string("Cannot create the ") + what + " import file: " + SDL_GetError();
         return result;
     }
     std::vector<std::uint8_t> buffer(1 << 16);
     std::size_t total = 0;
+    const std::size_t limit = rom ? sc64::runtime::rom_size : max_module_bytes;
     bool ok = true;
     for (;;) {
         const std::size_t read = SDL_ReadIO(input, buffer.data(), buffer.size());
         if (read == 0) { ok = SDL_GetIOStatus(input) == SDL_IO_STATUS_EOF; break; }
         total += read;
-        if (total > sc64::runtime::rom_size || SDL_WriteIO(output, buffer.data(), read) != read) { ok = false; break; }
+        if (total > limit || SDL_WriteIO(output, buffer.data(), read) != read) { ok = false; break; }
     }
     SDL_CloseIO(input);
     ok = SDL_CloseIO(output) && ok;
-    if (!ok || total != sc64::runtime::rom_size) {
+    const bool wrong_size = rom ? total != sc64::runtime::rom_size : total == 0;
+    if (!ok || wrong_size) {
         std::error_code ignored;
         std::filesystem::remove(target, ignored);
-        result.error = total > sc64::runtime::rom_size || (ok && total != sc64::runtime::rom_size)
-            ? "Expected a 32 MiB ROM dump" : "ROM import copy failed";
+        if (total > limit || (ok && wrong_size))
+            result.error = rom ? "Expected a 32 MiB ROM dump" : "The selected file is not a game module (empty or too large)";
+        else result.error = std::string(rom ? "ROM" : "Game module") + " import copy failed";
         return result;
     }
     result.path = target.string();
     return result;
 }
 
-void SDLCALL chosen(void*, const char* const* files, int) {
+void SDLCALL chosen(void* userdata, const char* const* files, int) {
+    const auto kind = static_cast<Sc64Pick>(reinterpret_cast<std::uintptr_t>(userdata));
+    const char* what = kind == Sc64Pick::rom ? "ROM" : "Game module";
     if (!files || !files[0]) {
         std::lock_guard lock(import_mutex);
-        if (!files) imports.complete({{}, std::string("ROM selection failed: ") + SDL_GetError()});
+        if (!files) imports.complete({{}, std::string(what) + " selection failed: " + SDL_GetError(), kind});
         else imports.cancel(); // dismissed without a selection
         return;
     }
@@ -75,27 +89,45 @@ void SDLCALL chosen(void*, const char* const* files, int) {
     lock.unlock();
     if (finished.joinable()) finished.join();
     lock.lock();
-    import_worker = std::thread([source, root = storage_root] {
-        auto result = copy_rom(source, root);
+    import_worker = std::thread([source, kind, root = storage_root] {
+        auto result = copy_selection(source, root, kind);
         std::lock_guard lock(import_mutex);
         if (const auto error = imports.complete(std::move(result)))
-            sc64::shell::log::warning("ROM import cleanup: %s", error.message().c_str());
+            sc64::shell::log::warning("Import cleanup: %s", error.message().c_str());
     });
 }
 }
 
 void sc64_platform_attach_window(SDL_Window* value) { window = value; }
 
-bool sc64_choose_rom() {
+bool sc64_choose_file(Sc64Pick kind) {
     {
         std::lock_guard lock(import_mutex);
         if (!imports.begin()) return false;
+        pending_kind = kind;
     }
-    SDL_ShowOpenFileDialog(chosen, nullptr, window, nullptr, 0, nullptr, false);
+    void* userdata = reinterpret_cast<void*>(static_cast<std::uintptr_t>(kind));
+#if defined(__ANDROID__)
+    // The Android picker filters by MIME type, which a module does not have: it takes any file.
+    SDL_ShowOpenFileDialog(chosen, userdata, window, nullptr, 0, nullptr, false);
+#else
+    if (kind == Sc64Pick::game_module) {
+        static const SDL_DialogFileFilter filters[] = {{"Game module", "so;dylib;dll"}, {"All files", "*"}};
+        SDL_ShowOpenFileDialog(chosen, userdata, window, filters, int(std::size(filters)), nullptr, false);
+    } else {
+        SDL_ShowOpenFileDialog(chosen, userdata, window, nullptr, 0, nullptr, false);
+    }
+#endif
     return true;
 }
 
-Sc64RomSelection sc64_poll_rom() {
+std::optional<Sc64Pick> sc64_pending_pick() {
+    std::lock_guard lock(import_mutex);
+    if (!imports.busy()) return std::nullopt;
+    return pending_kind;
+}
+
+Sc64Selection sc64_poll_selection() {
     std::lock_guard lock(import_mutex);
     return imports.take();
 }

@@ -853,7 +853,10 @@ make push-android-module SERIAL=DEVICE_SERIAL [DATA_DIR=...]
 ```
 
 The launcher has its own application ID (`com.nomadic.sc64.launcher`), so it coexists with the personal
-APK and has separate saves and ROM storage. Choose your ROM in the app as usual. The pushed module goes
+APK and has separate saves and ROM storage. Its start screen shows the icon, the title, what is needed next and two
+buttons: "Select ROM" and "Select game module" (the system file picker; the module is checked by loading it from a
+private copy and then installed over the previous one, a refused file changes nothing; ADR-091). So `adb` is optional:
+copy `sc64-game.so` to the phone and pick it. Without the picker, a pushed module goes
 to `/sdcard/Android/data/com.nomadic.sc64.launcher/files/sc64-game.so`; at the next start the app moves it into
 its private `files/game/` (the linker does not load code from shared storage) and loads it. Run
 `push-android-module` after the app has been started once: a folder created by `adb` is not readable by the app.

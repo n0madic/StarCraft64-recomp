@@ -1,5 +1,6 @@
 // Loader for the game module (ADR-086), against synthetic modules built like the real one.
 #include "game_module.hpp"
+#include "module_import.hpp"
 #include <SDL3/SDL_loadso.h>
 #include <atomic>
 #include <cstdio>
@@ -69,6 +70,100 @@ void test_install_staged() {
     fs::remove_all(root, ignored);
 }
 
+// A module the user picked is checked before it replaces the installed one (a refused file changes nothing).
+void test_import_module(const std::filesystem::path& good, const char* const* refused, const char* const* messages, int count) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / ("sc64-game-import-test-" + std::to_string(std::rand()));
+    fs::remove_all(root);
+    const fs::path picked = root / "sc64-import-1.tmp", target = root / "game" / game::module_file_name();
+    const auto place = [&](const fs::path& module) { fs::create_directories(root); fs::copy_file(module, picked, fs::copy_options::overwrite_existing); };
+    const auto refuses = [&](const char* fragment, int line) {
+        try {
+            game::import_module(picked, root);
+            check(false, "import_module should have thrown", line);
+        } catch (const game::ModuleError& error) {
+            if (std::string(error.what()).find(fragment) == std::string::npos) {
+                std::fprintf(stderr, "FAIL line %d: \"%s\" lacks \"%s\"\n", line, error.what(), fragment);
+                ++failures;
+            }
+        }
+    };
+    CHECK(game::importable());
+#if !defined(_WIN32)
+    // A module named by the environment (or beside the application) is the application's own: nothing to supply.
+    setenv("SC64_GAME_MODULE", "/somewhere/sc64-game", 1);
+    CHECK(game::bundled());
+    unsetenv("SC64_GAME_MODULE");
+#endif
+    place(good);
+#if !defined(_WIN32)
+    // A read-only leftover of an earlier import does not stop the next one.
+    spit(root / "game" / (".import-" + game::module_file_name()), "stale");
+    fs::permissions(root / "game" / (".import-" + game::module_file_name()), fs::perms::owner_read);
+#endif
+    game::import_module(picked, root);
+    CHECK(!fs::exists(picked) && fs::is_regular_file(target) && slurp(target) == slurp(good));
+    CHECK(!fs::exists(root / "game" / (".import-" + game::module_file_name())));
+    const std::string installed = slurp(target);
+    for (int i = 0; i < count; ++i) {
+        place(refused[i]);
+        refuses(messages[i], __LINE__);
+        CHECK(slurp(target) == installed);  // the working module stays
+        CHECK(!fs::exists(root / "game" / (".import-" + game::module_file_name())));
+    }
+    spit(picked, "not a library");
+    refuses("not a game module", __LINE__);
+    CHECK(slurp(target) == installed);
+    place(good);  // the same module again replaces the read-only file
+    game::import_module(picked, root);
+    CHECK(slurp(target) == installed);
+    std::error_code ignored;
+    fs::permissions(target, fs::perms::owner_all, ignored);
+    fs::remove_all(root, ignored);
+}
+
+// A refused module is unloaded: the corrected module installed over the same path is the one that loads next.
+void test_reload_after_refusal(const std::filesystem::path& good, const std::filesystem::path& bad_abi) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / ("sc64-game-reload-test-" + std::to_string(std::rand()));
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const fs::path module = root / game::module_file_name();
+    fs::copy_file(bad_abi, module);
+    try {
+        game::load_file(module, rom);
+        CHECK(false);
+    } catch (const game::ModuleError&) {}
+    fs::remove(module);  // a new file (new inode) at the same path, as an import does
+    fs::copy_file(good, module);
+    const Sc64ModuleInfo& info = game::load_file(module, rom);
+    CHECK(info.entrypoint_vram == 0x80000400u);
+    std::error_code ignored;
+    fs::remove_all(root, ignored);
+}
+
+// What follows a module the user picked: install, then start with a kept ROM or ask for it.
+void test_module_import_event() {
+    using Kind = sc64::shell::ImportEvent::Kind;
+    const auto event = [](bool install_ok, std::optional<std::string> rom, std::optional<std::string> load_error, std::string* loaded = nullptr) {
+        return sc64::shell::module_import_event(
+            [&] { if (!install_ok) throw game::ModuleError("refused"); },
+            [&] { return rom; },
+            [&](const std::string& path) { if (loaded) *loaded = path; return load_error; });
+    };
+    auto result = event(false, "rom", std::nullopt);
+    CHECK(result.kind == Kind::failed && result.text == "refused");  // a refused module starts nothing
+    std::string loaded;
+    result = event(true, "stored.z64", std::nullopt, &loaded);
+    CHECK(result.kind == Kind::started && loaded == "stored.z64");
+    result = event(true, "stored.z64", "Expected a 32 MiB ROM dump");
+    CHECK(result.kind == Kind::failed && result.text == "Expected a 32 MiB ROM dump");
+    loaded.clear();
+    result = event(true, std::nullopt, std::nullopt, &loaded);
+    CHECK(result.kind == Kind::notice && loaded.empty() && result.text.find("choose your ROM") != std::string::npos);
+    std::puts("module import events passed");
+}
+
 // The Android-only decisions are pure functions, so they are checked here.
 void test_staging_policy() {
     namespace fs = std::filesystem;
@@ -78,10 +173,12 @@ void test_staging_policy() {
     CHECK(game::staging_directory(34, nullptr).empty() && game::staging_directory(34, "").empty());
     const std::vector<fs::path> places = {"/data/game/sc64-game.so"};
     const auto android = game::missing_message(places, "/sdcard/files", false, "");
-    for (const char* part : {"was not found", "/data/game/sc64-game.so", "make setup-game MODULE_TARGET=android-arm64", "/sdcard/files", "adb push"})
+    for (const char* part : {"was not found", "/data/game/sc64-game.so", "make setup-game MODULE_TARGET=android-arm64", "/sdcard/files", "adb push",
+                             "Select game module"})
         CHECK(android.find(part) != std::string::npos);
     const auto old_android = game::missing_message(places, {}, true, "");
-    CHECK(old_android.find("Android 11") != std::string::npos && old_android.find("adb push") == std::string::npos);
+    CHECK(old_android.find("Android 10") != std::string::npos && old_android.find("adb push") == std::string::npos);
+    CHECK(old_android.find("Select game module") != std::string::npos);
     const auto desktop = game::missing_message(places, {}, false, "");
     CHECK(desktop.find("docs/desktop.md") != std::string::npos && desktop.find("Android") == std::string::npos);
     CHECK(game::missing_message(places, "/sdcard/files", false, "Cannot access the staged module").find("Cannot access the staged module") != std::string::npos);
@@ -118,6 +215,13 @@ int main(int argc, char** argv) {
 
     test_install_staged();
     test_staging_policy();
+    {
+        const char* refused[] = {argv[2], argv[3], argv[4], argv[5], argv[6]};
+        const char* messages[] = {"ABI", "layout", "different ROM", "refused", "not a game module"};
+        test_import_module(good, refused, messages, 5);
+        test_reload_after_refusal(good, argv[2]);
+        test_module_import_event();
+    }
 
     // A good module loads, validates and its function pointers work.
     const Sc64ModuleInfo& info = game::load_file(good, rom);

@@ -84,10 +84,9 @@ Sc64HostApi host_api() {
     return api;
 }
 
-const Sc64ModuleInfo& load_file(const std::filesystem::path& file, std::string_view expected_rom_sha1) {
-    // The handle is deliberately never released: guest threads may still run module code at exit.
-    SDL_SharedObject* object = SDL_LoadObject(utf8(file).c_str());
-    if (!object) throw ModuleError("Cannot load game module " + utf8(file) + ": " + SDL_GetError());
+namespace {
+// The module's description, once `object` is loaded: initialized with the host API and validated.
+const Sc64ModuleInfo& bind(SDL_SharedObject* object, const std::filesystem::path& file, std::string_view expected_rom_sha1) {
     const auto init = reinterpret_cast<Sc64ModuleInitFn>(SDL_LoadFunction(object, SC64_MODULE_INIT));
     if (!init) throw ModuleError(utf8(file) + " is not a game module (" SC64_MODULE_INIT " not found)");
     static const Sc64HostApi api = host_api();
@@ -95,6 +94,21 @@ const Sc64ModuleInfo& load_file(const std::filesystem::path& file, std::string_v
     if (!info) throw ModuleError(utf8(file) + " refused this application (ABI mismatch); rebuild the game module");
     validate(*info, expected_rom_sha1);
     return *info;
+}
+}
+
+const Sc64ModuleInfo& load_file(const std::filesystem::path& file, std::string_view expected_rom_sha1) {
+    // The handle of a module that is accepted is deliberately never released: guest threads may still run its code at exit.
+    SDL_SharedObject* object = SDL_LoadObject(utf8(file).c_str());
+    if (!object) throw ModuleError("Cannot load game module " + utf8(file) + ": " + SDL_GetError());
+    try {
+        return bind(object, file, expected_rom_sha1);
+    } catch (...) {
+        // A refused module must not stay mapped: loading the path again (a corrected module installed over it)
+        // would otherwise return this image, as the loader matches already loaded objects by name.
+        SDL_UnloadObject(object);
+        throw;
+    }
 }
 
 namespace {
@@ -135,14 +149,79 @@ std::string missing_message(const std::vector<std::filesystem::path>& places, co
     std::string message = "The game module " + module_file_name() + " was not found. Looked in:";
     for (const auto& place : places) message += "\n  " + utf8(place);
     if (!import_error.empty()) message += "\n" + std::string(import_error);
+    constexpr const char* build = "build it on a computer from your ROM (make setup-game MODULE_TARGET=android-arm64)";
     if (staged.empty() && refused_by_version)
-        message += "\nThis Android version (10 or older) does not import a module from shared storage; use Android 11 or newer.";
+        message += std::string("\nChoose it with the Select game module button (") + build +
+                   "). Copying it to shared storage is not used on Android 10 or older.";
     else if (!staged.empty())
-        message += "\nBuild it on a computer from your ROM (make setup-game MODULE_TARGET=android-arm64), copy sc64-game.so to\n  " +
+        message += std::string("\nChoose it with the Select game module button (") + build + "), or copy sc64-game.so to\n  " +
                    utf8(staged) + "\n(adb push) and start the application again.";
     else
         message += "\nBuild it from your ROM (docs/desktop.md) and place it beside the application or in the game folder above.";
     return message;
+}
+
+namespace {
+// Loaded code is kept read-only (Android 14 refuses writable dynamically loaded files for dex; the same rule is cheap here).
+void make_read_only(const std::filesystem::path& file) {
+    std::error_code error;
+    std::filesystem::permissions(file, std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec, error);
+    if (error) shell::log::warning("The imported game module stays writable: %s", error.message().c_str());
+}
+
+// Removes a file that may be read-only (Windows refuses to delete one).
+void discard(const std::filesystem::path& file) {
+    std::error_code ignored;
+    std::filesystem::permissions(file, std::filesystem::perms::owner_all, ignored);
+    std::filesystem::remove(file, ignored);
+}
+
+// rename replaces the old module in one step: a failure leaves it in place (and removes `temporary`).
+void replace_module(const std::filesystem::path& temporary, const std::filesystem::path& target) {
+    namespace fs = std::filesystem;
+    std::error_code error;
+    fs::rename(temporary, target, error);
+#if defined(_WIN32)
+    if (error) {  // Windows cannot rename over an existing file
+        discard(target);
+        fs::rename(temporary, target, error);
+    }
+#endif
+    if (error) { discard(temporary); throw ModuleError("Cannot install the game module as " + utf8(target)); }
+}
+
+std::filesystem::path import_name() { return ".import-" + module_file_name(); }
+
+// SDL reports "./" as the base path on Android: not an application folder.
+std::filesystem::path application_folder() {
+    const char* base = SDL_GetBasePath();
+    std::filesystem::path folder = base ? base : "";
+    return folder.is_absolute() ? folder : std::filesystem::path();
+}
+std::string override_module() {
+    const char* value = std::getenv("SC64_GAME_MODULE");
+    return value ? value : "";
+}
+// Where load() looks for a module file.
+std::vector<std::filesystem::path> search_places(const std::filesystem::path& storage) {
+    return candidates(storage, application_folder(), override_module());
+}
+
+// Whether the file mentions the module's entry point: a cheap check that the picked file is meant to be a
+// game module at all, before any of its code is run (it keeps an unrelated library from being loaded).
+bool names_module_entry(const std::filesystem::path& file) {
+    constexpr std::string_view marker = SC64_MODULE_INIT;
+    std::ifstream in(file, std::ios::binary);
+    std::string window;
+    std::vector<char> chunk(1 << 16);
+    while (in.read(chunk.data(), std::streamsize(chunk.size())) || in.gcount() > 0) {
+        window.append(chunk.data(), std::size_t(in.gcount()));
+        if (window.find(marker) != std::string::npos) return true;
+        // Keep the tail, so that a name that straddles two chunks is found.
+        if (window.size() >= marker.size()) window.erase(0, window.size() - (marker.size() - 1));
+    }
+    return false;
+}
 }
 
 bool install_staged(const std::filesystem::path& staged, const std::filesystem::path& storage) {
@@ -162,36 +241,75 @@ bool install_staged(const std::filesystem::path& staged, const std::filesystem::
         if (current && *current == *bytes) { forget_source(); return false; }
     }
     fs::create_directories(target.parent_path(), error);
-    const fs::path temporary = target.parent_path() / (".import-" + module_file_name());
-    fs::remove(temporary, error);
+    const fs::path temporary = target.parent_path() / import_name();
+    discard(temporary);
     {
         std::ofstream out(temporary, std::ios::binary);
         out.write(bytes->data(), std::streamsize(bytes->size()));
         out.flush();
-        if (!out) { fs::remove(temporary, error); throw ModuleError("Cannot copy the game module to " + utf8(target)); }
+        if (!out) { discard(temporary); throw ModuleError("Cannot copy the game module to " + utf8(target)); }
     }
-    // Loaded code is kept read-only (Android 14 refuses writable dynamically loaded files for dex; the same rule is cheap here).
-    fs::permissions(temporary, fs::perms::owner_read | fs::perms::owner_exec, error);
-    if (error) shell::log::warning("The imported game module stays writable: %s", error.message().c_str());
-    // rename replaces the old module in one step: a failure leaves it in place.
-    fs::rename(temporary, target, error);
-#if defined(_WIN32)
-    if (error) {  // Windows cannot rename over an existing file
-        std::error_code ignored;
-        fs::remove(target, ignored);
-        fs::rename(temporary, target, error);
-    }
-#endif
-    if (error) { std::error_code ignored; fs::remove(temporary, ignored); throw ModuleError("Cannot install the game module as " + utf8(target)); }
+    make_read_only(temporary);
+    replace_module(temporary, target);
     forget_source();
     return true;
+}
+
+bool importable() { return true; }
+
+bool bundled() {
+    // A module named by the environment, or one beside the application, is the application's own.
+    if (!override_module().empty()) return true;
+    std::error_code error;
+    const auto folder = application_folder();
+    return !folder.empty() && std::filesystem::is_regular_file(folder / module_file_name(), error);
+}
+
+bool installed(const std::filesystem::path& storage) {
+    std::error_code error;
+    for (const auto& place : search_places(storage))
+        if (std::filesystem::is_regular_file(place, error)) return true;
+    return false;
+}
+
+void import_module(const std::filesystem::path& source, const std::filesystem::path& storage) {
+    namespace fs = std::filesystem;
+    std::lock_guard lock(mutex);
+    if (loaded) throw ModuleError("A game module is already in use; restart the application to use a different one");
+    const fs::path directory = storage / "game", temporary = directory / import_name();
+    std::error_code error;
+    fs::create_directories(directory, error);
+    discard(temporary);
+    fs::rename(source, temporary, error);
+    if (error) {  // another volume
+        fs::copy_file(source, temporary, fs::copy_options::overwrite_existing, error);
+        if (error) throw ModuleError("Cannot copy the game module to " + utf8(temporary) + ": " + error.message());
+        fs::remove(source, error);
+    }
+    if (!names_module_entry(temporary)) {
+        discard(temporary);
+        throw ModuleError("The selected file is not a game module (" SC64_MODULE_INIT " not found in it)");
+    }
+    // The dynamic loader only accepts code from the application's own storage, so the check happens on the copy.
+    // The handle is released again: this module is not the one in use, and the installed one is loaded by load().
+    // The copy stays writable until it is accepted, so that a refused one can always be deleted.
+    SDL_SharedObject* object = SDL_LoadObject(utf8(temporary).c_str());
+    try {
+        if (!object) throw ModuleError("The selected file is not a game module for this system: " + std::string(SDL_GetError()));
+        bind(object, "The selected file", runtime::rom_sha1);
+    } catch (...) {
+        if (object) SDL_UnloadObject(object);
+        discard(temporary);
+        throw;
+    }
+    SDL_UnloadObject(object);
+    make_read_only(temporary);
+    replace_module(temporary, directory / module_file_name());
 }
 
 const Sc64ModuleInfo& load(const std::filesystem::path& storage) {
     std::lock_guard lock(mutex);
     if (loaded) return *loaded;
-    const char* base = SDL_GetBasePath();
-    const char* override_path = std::getenv("SC64_GAME_MODULE");
     const auto staged = staging_dir();
     std::string import_error;
     if (!staged.empty()) {
@@ -203,7 +321,7 @@ const Sc64ModuleInfo& load(const std::filesystem::path& storage) {
             shell::log::warning("%s", error.what());
         }
     }
-    const auto places = candidates(storage, base ? base : "", override_path ? override_path : "");
+    const auto places = search_places(storage);
     for (const auto& place : places) {
         std::error_code error;
         if (std::filesystem::is_regular_file(place, error)) return *(loaded = &load_file(place, runtime::rom_sha1));

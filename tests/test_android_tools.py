@@ -56,6 +56,7 @@ class AndroidPackageTests(unittest.TestCase):
         self.assertIn('sc64.render_driver = vulkan,opengles2\n', builder.config_text(builder.DEFAULT_RENDER_DRIVER, True))
         self.assertIn('sc64.render_driver = opengles2\n', builder.config_text('opengles2', False))
         self.assertIn('sc64.bundled_rom = 1\n', builder.config_text('opengles2', True))
+        self.assertIn('sc64.log_level = debug\n', builder.config_text('opengles2', False))  # the probes read DEBUG telemetry
 
     def test_launcher_variant_has_its_own_outputs_package_and_manifest(self):
         spec = importlib.util.spec_from_file_location('launcher_build', ROOT / 'tools/android/build.py')
