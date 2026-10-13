@@ -143,6 +143,71 @@ class AndroidCommandTests(unittest.TestCase):
             line = commands(WINDOWS, 'build-android')[0]
         self.assertEqual(line[2:], ['--jobs', '8', '--build-type', 'Release'])
 
+    def test_launcher_variant_selects_its_apk_package_and_probes(self):
+        with clean_env():
+            build = commands(LINUX, 'build-android-launcher', '--sdk', '/sdk')[0]
+            check = commands(LINUX, 'check-apk', '--launcher')[0]
+            run = commands(LINUX, 'run-android', '--serial', 'S1', '--launcher')[0]
+            smoke = commands(LINUX, 'smoke-android', '--serial', 'S1', '--launcher', '--report', '/r/new')[0]
+            audio = commands(LINUX, 'audio-android', '--serial', 'S1', '--launcher', '--report', '/r/new')[0]
+            personal = commands(LINUX, 'run-android', '--serial', 'S1')[0]
+        self.assertIn('--launcher', build)
+        self.assertTrue(check[2].endswith('StarCraft64-android-launcher.apk'))
+        self.assertEqual(run[-1], 'com.nomadic.sc64.launcher/com.nomadic.sc64.Sc64Activity')
+        self.assertEqual(personal[-1], driver.ACTIVITY)
+        for line in (smoke, audio):
+            self.assertEqual(line[line.index('--package') + 1], 'com.nomadic.sc64.launcher')
+        self.assertTrue(smoke[smoke.index('--apk') + 1].endswith('StarCraft64-android-launcher.apk'))
+        self.assertIn('--launcher', check)
+        self.assertNotIn('--launcher', commands(LINUX, 'check-apk')[0])
+        with clean_env(), self.assertRaisesRegex(SystemExit, 'never contains a ROM'):
+            commands(LINUX, 'build-android-launcher', '--bundle-rom', '--rom', '/g.z64')
+
+    def test_android_launcher_variable_does_not_change_what_build_android_builds(self):
+        # $ANDROID_LAUNCHER selects the APK of install/run/smoke/check-apk; only build-android-launcher builds the launcher.
+        with clean_env(ANDROID_LAUNCHER='1'):
+            default = commands(LINUX, 'build-android')[0]
+            emulator = commands(LINUX, 'build-android-opengles')[0]
+            launcher = commands(LINUX, 'build-android-launcher')[0]
+            check = commands(LINUX, 'check-apk')[0]
+        self.assertNotIn('--launcher', default)
+        self.assertNotIn('--launcher', emulator)
+        self.assertIn('--launcher', launcher)
+        self.assertTrue(check[2].endswith('StarCraft64-android-launcher.apk'))
+
+    def test_push_module_stages_it_in_the_apps_own_folder(self):
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            return mock.Mock(returncode=0, stdout='present\n', stderr='')
+        with tempfile.TemporaryDirectory() as directory, clean_env(), mock.patch.object(driver.subprocess, 'run', side_effect=fake_run):
+            args = driver.parser().parse_args(['push-android-module', '--serial', 'S1', '--data-dir', directory])
+            with self.assertRaisesRegex(SystemExit, 'setup-game MODULE_TARGET=android-arm64'):
+                driver.push_android_module(LINUX, args)
+            module = Path(directory) / 'game-android-arm64/sc64-game.so'
+            module.parent.mkdir()
+            module.write_bytes(b'module')
+            self.assertEqual(driver.push_android_module(LINUX, args), 0)
+        folder = '/sdcard/Android/data/com.nomadic.sc64.launcher/files'
+        self.assertEqual(calls[0][:4], ['adb', '-s', 'S1', 'shell'])
+        self.assertIn(f'test -d {folder}', calls[0][4])
+        # The file goes into the folder the app created, not into a subfolder made by adb (unreadable by the app).
+        self.assertEqual([str(word) for word in calls[1]], ['adb', '-s', 'S1', 'push', str(module), folder + '/sc64-game.so'])
+
+    def test_push_module_tells_a_missing_folder_from_an_adb_failure(self):
+        for answer, message in ((mock.Mock(returncode=0, stdout='absent\n', stderr=''), 'start it once'),
+                                (mock.Mock(returncode=1, stdout='', stderr='error: device offline'), 'device offline'),
+                                (mock.Mock(returncode=0, stdout='', stderr=''), 'could not reach')):
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as directory, clean_env(), \
+                    mock.patch.object(driver.subprocess, 'run', return_value=answer):
+                module = Path(directory) / 'game-android-arm64/sc64-game.so'
+                module.parent.mkdir()
+                module.write_bytes(b'module')
+                args = driver.parser().parse_args(['push-android-module', '--serial', 'S1', '--data-dir', directory])
+                with self.assertRaisesRegex(SystemExit, message):
+                    driver.push_android_module(LINUX, args)
+
     def test_opengles_target_selects_the_emulator_driver_and_apk(self):
         with clean_env():
             self.assertIn('opengles2', commands(LINUX, 'build-android-opengles')[0])

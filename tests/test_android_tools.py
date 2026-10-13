@@ -57,6 +57,66 @@ class AndroidPackageTests(unittest.TestCase):
         self.assertIn('sc64.render_driver = opengles2\n', builder.config_text('opengles2', False))
         self.assertIn('sc64.bundled_rom = 1\n', builder.config_text('opengles2', True))
 
+    def test_launcher_variant_has_its_own_outputs_package_and_manifest(self):
+        spec = importlib.util.spec_from_file_location('launcher_build', ROOT / 'tools/android/build.py')
+        builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder)
+        root = Path('/repo')
+        self.assertEqual(builder.output_paths('vulkan', root, launcher=True),
+                         (root / 'local/dist/StarCraft64-android-launcher.apk', root / 'local/reports/android/build-launcher.json'))
+        self.assertEqual(builder.output_paths('opengles2', root, True)[0], root / 'local/dist/StarCraft64-android-launcher-opengles2.apk')
+        self.assertEqual(builder.output_paths('vulkan', root)[0], root / 'local/dist/StarCraft64-android.apk')  # personal APK unchanged
+        self.assertNotEqual(builder.LAUNCHER_PACKAGE, builder.PERSONAL_PACKAGE)
+        source = (ROOT / 'native/android/AndroidManifest.xml').read_text()
+        manifest = builder.launcher_manifest(source)
+        self.assertIn(f'package="{builder.LAUNCHER_PACKAGE}"', manifest)
+        # The home screen shows the activity's label, so both labels change.
+        self.assertEqual(manifest.count(f'android:label="{builder.LAUNCHER_LABEL}"'), 2)
+        self.assertNotIn('android:label="StarCraft 64"', manifest)
+        self.assertNotIn(builder.PERSONAL_PACKAGE, manifest.split('<application')[0].split('<manifest')[1])
+        self.assertEqual(manifest.count('android:name="com.nomadic.sc64.Sc64Activity"'), 1)  # same activity class
+        with self.assertRaises(ValueError):
+            builder.launcher_manifest(source.replace('android:label="StarCraft 64"', 'android:label="X"', 1))
+
+    def test_launcher_audit_rejects_a_game_linked_library_and_a_rom(self):
+        self.assertTrue(apk_check.contains_game_code(b'..recomp_entrypoint..'))
+        self.assertTrue(apk_check.contains_game_code(b'sc64_resident_8000B988'))
+        self.assertFalse(apk_check.contains_game_code(b'only the shell and SDL'))
+        with tempfile.TemporaryDirectory() as directory:
+            for game, launcher, ok in ((False, True, True), (True, True, False), (True, False, True)):
+                apk = Path(directory) / f'{int(game)}{int(launcher)}.apk'
+                payload = elf() + (b'\0recomp_entrypoint\0' if game else b'')
+                with ZipFile(apk, 'w') as archive:
+                    archive.writestr('lib/arm64-v8a/libmain.so', payload, compress_type=ZIP_DEFLATED)
+                    archive.writestr('classes.dex', b'dex')
+                if ok:
+                    report = apk_check.audit(apk, launcher=launcher)
+                    self.assertEqual((report['game_code_linked'], report['launcher']), (game, launcher))
+                else:
+                    with self.assertRaisesRegex(ValueError, 'links the recompiled game'):
+                        apk_check.audit(apk, launcher=launcher)
+            with self.assertRaisesRegex(ValueError, 'never contains a ROM'):
+                apk_check.audit(Path(directory) / '00.apk', bundled_rom=True, launcher=True)
+
+    def test_constants_shared_between_c_cmake_manifest_and_python_agree(self):
+        import re
+        sys.path.insert(0, str(ROOT / 'tools'))
+        sys.path.insert(0, str(ROOT / 'tools/android'))
+        import adb_client
+        import pins
+        spec = importlib.util.spec_from_file_location('sc64_driver_constants', ROOT / 'tools/sc64.py')
+        driver = importlib.util.module_from_spec(spec); spec.loader.exec_module(driver)
+        header = (ROOT / 'native/setup/toolchain.hpp').read_text()
+        # The module is built for the API level of the app (sc64_setup --target android-arm64).
+        self.assertEqual(int(re.search(r'kAndroidApi = (\d+);', header).group(1)), pins.API)
+        names = re.search(r'target_names\(\) \{ return \{([^}]*)\}; \}', (ROOT / 'native/setup/toolchain.cpp').read_text()).group(1)
+        self.assertEqual(tuple(re.findall(r'"([^"]+)"', names)), driver.MODULE_TARGETS)
+        # The personal application ID is written in four places.
+        self.assertIn(f'package="{adb_client.PACKAGE}"', (ROOT / 'native/android/AndroidManifest.xml').read_text())
+        self.assertIn(f'set(SC64_ANDROID_PACKAGE "{adb_client.PACKAGE}"', (ROOT / 'native/android/CMakeLists.txt').read_text())
+        self.assertIn(f'#define SC64_APP_ID "{adb_client.PACKAGE}"', (ROOT / 'native/shell/app.cpp').read_text())
+        self.assertEqual(adb_client.ACTIVITY_CLASS, 'com.nomadic.sc64.Sc64Activity')
+        self.assertIn(f'android:name="{adb_client.ACTIVITY_CLASS}"', (ROOT / 'native/android/AndroidManifest.xml').read_text())
+
     def test_aligned_elf(self):
         self.assertEqual(len(apk_check.elf_segments(elf())), 2)
 

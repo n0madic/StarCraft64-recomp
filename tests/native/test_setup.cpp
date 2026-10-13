@@ -290,10 +290,13 @@ void test_android_target() {
     CHECK(ndk.program == fs::path("/ndk/bin/clang") && ndk.prefix == std::vector<std::string>{"--target=aarch64-linux-android28"});
     const auto compile = compile_args(ndk, android, sources, "/gen/funcs_1.c", "/w/funcs_1.o");
     CHECK(compile[0] == "--target=aarch64-linux-android28" && has(compile, "-fPIC") && has(compile, "-fexceptions"));
+    // Temporary build directories do not leak into the module through assert/__FILE__ strings.
+    CHECK(has(compile, "-ffile-prefix-map=/gen=generated") && has(compile, "-ffile-prefix-map=/res/module=module"));
     CHECK(!has(compile, "-mmacosx-version-min=13.0"));
     const auto link = link_args(ndk, android, {"a.o", "b.o"}, "/w/sc64-game.so");
     CHECK(link[0] == "--target=aarch64-linux-android28" && has(link, "-shared") && has(link, "-s") && link.back() == "/w/sc64-game.so");
-    for (const char* flag : {"-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384", "-Wl,-z,noexecstack", "-Wl,-z,relro", "-Wl,-z,now"})
+    for (const char* flag : {"-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384", "-Wl,-z,noexecstack", "-Wl,-z,relro", "-Wl,-z,now",
+                             "-Wl,--no-undefined"})
         CHECK(has(link, flag));
     CHECK(!has(link, "-dynamiclib") && !has_prefix(link, "-Wl,-install_name") && !has(link, "-static-libgcc"));
     CHECK(!has(link_args(Toolchain{"gcc", "gcc", {}, "", {}}, linux, {"a.o"}, "m.so"), "-Wl,-z,max-page-size=16384"));
@@ -320,12 +323,16 @@ void test_android_target() {
     CHECK(found[1] == sdk / "ndk" / "29.0.14206865" && found[2] == sdk / "ndk" / "27.1.12297006" && found[3] == sdk / "ndk" / "9.0.1");
     CHECK(found[4] == home / "Android" / "Sdk" / "ndk" / "26.0.1");  // the SDK's usual place for the OS
     CHECK(ndk_candidates(linux, [](const char*) { return std::string(); }).empty());
+    CHECK(!find_ndk(linux, env));  // no candidate holds a driver yet
     CHECK(ndk_candidates(mac, [&](const char* name) { return std::string(name) == "HOME" ? home.string() : std::string(); }).empty());
     // A driver is found only where the NDK ships one for this host.
     const fs::path clang = sdk / "ndk" / "29.0.14206865" / "toolchains" / "llvm" / "prebuilt" / "linux-x86_64" / "bin" / "clang";
     CHECK(ndk_clang(sdk / "ndk" / "29.0.14206865", linux).empty());
     write(clang, "");
     CHECK(ndk_clang(sdk / "ndk" / "29.0.14206865", linux) == clang);
+    // A stale $ANDROID_NDK_ROOT (a directory without a driver) does not hide the usable NDK behind it.
+    CHECK(find_ndk(linux, env) == sdk / "ndk" / "29.0.14206865");
+    CHECK(!find_ndk(mac, env));
     CHECK(ndk_clang(sdk / "ndk" / "29.0.14206865", mac).empty());
     fs::remove_all(root);
 }
@@ -503,10 +510,18 @@ void test_flow() {
         }
         CHECK(ndk_compiles == 3 + 1);
         CHECK(module_is_current(android) && !module_is_current(w.options()));  // the host module is a different thing
+        const auto host_receipt = nlohmann::json::parse(sc64::setup::read_file(w.data / "game-android-arm64" / "receipt.json"));
+        CHECK(host_receipt["target"] == "android-arm64");
         const std::size_t before = w.commands.size();
         CHECK(!run_setup(android, w.runner(), report).rebuilt && w.commands.size() == before);
+        // zig cannot build for Android: say so instead of silently using the NDK.
+        Options zig = android; zig.use_zig = true; zig.force = true;
+        CHECK_ERROR(run_setup(zig, w.runner(), report), "--use-zig does not apply");
         // A host build next to it does not disturb the Android one, and an old receipt without a target never matches.
         CHECK(run_setup(w.options(), w.runner(), report).rebuilt && module_is_current(android));
+        const auto android_sources = nlohmann::json::parse(sc64::setup::read_file(w.data / "game-android-arm64" / "receipt.json"))["sources_sha256"];
+        const auto host_sources = nlohmann::json::parse(sc64::setup::read_file(w.data / "game" / "receipt.json"))["sources_sha256"];
+        CHECK(android_sources != host_sources);  // link arguments and the API level are part of the inputs
         auto stale = nlohmann::json::parse(sc64::setup::read_file(w.data / "game-android-arm64" / "receipt.json"));
         stale.erase("target");
         write(w.data / "game-android-arm64" / "receipt.json", stale.dump());

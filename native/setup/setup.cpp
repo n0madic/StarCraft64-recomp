@@ -55,6 +55,9 @@ std::string module_inputs_sha256(const fs::path& module_dir, const Platform& tar
         text += std::string(name) + '=' + (fs::is_regular_file(file, error) ? file_sha256(file) : "absent") + '\n';
     }
     for (const auto& flag : compile_flags(target)) text += flag + '\n';
+    // The link arguments and the Android API level (in the NDK driver's --target) are part of what the module is built with.
+    const Toolchain reference{"clang", "clang", target.os == "android" ? ndk_toolchain({}).prefix : std::vector<std::string>{}, "", {}};
+    for (const auto& argument : link_args(reference, target, {}, "sc64-game" + target.module_suffix)) text += "link:" + argument + '\n';
     return sha256_of(text);
 }
 
@@ -96,6 +99,8 @@ Toolchain choose_toolchain(const Options& options, const Platform& host, const P
         return *found;
     }
     if (target.os == "android") {
+        if (options.use_zig)
+            throw SetupError("--use-zig does not apply to --target android-arm64: zig cannot provide Android's libc. The Android NDK is used.");
         const fs::path clang = options.ndk ? ndk_clang(*options.ndk, host) : fs::path();
         if (clang.empty())
             throw SetupError(options.ndk ? "No clang driver for this machine under the Android NDK " + utf8(*options.ndk)

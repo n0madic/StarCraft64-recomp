@@ -56,6 +56,9 @@ inline constexpr int kAndroidApi = 28;
 // newest `ndk/<version>` under $ANDROID_SDK_ROOT, $ANDROID_HOME, $ANDROID_SDK and the SDK's usual place for
 // `host`. `env` returns an environment variable or "". Only directories that exist are returned.
 std::vector<std::filesystem::path> ndk_candidates(const Platform& host, const std::function<std::string(const char*)>& env);
+// The first of ndk_candidates that holds a clang driver for `host` (a stale variable or a half-installed
+// version does not hide a usable NDK), or nullopt.
+std::optional<std::filesystem::path> find_ndk(const Platform& host, const std::function<std::string(const char*)>& env);
 // The NDK's clang driver for `host`; empty if `ndk` is not an NDK root.
 std::filesystem::path ndk_clang(const std::filesystem::path& ndk, const Platform& host);
 Toolchain ndk_toolchain(const std::filesystem::path& clang);

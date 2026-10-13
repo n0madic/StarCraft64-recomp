@@ -81,6 +81,7 @@ def main() -> None:
     source.add_argument('--serial', help='Explicit connected adb device serial')
     source.add_argument('--log', type=Path, help='Analyze a previously collected app log')
     parser.add_argument('--adb', default='adb')
+    parser.add_argument('--package', default=PACKAGE, help='Application ID of the running app (default: the personal APK)')
     parser.add_argument('--seconds', type=float, default=60)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -91,13 +92,13 @@ def main() -> None:
     device = None
     if args.serial:
         adb = device_command(args.adb, args.serial)
-        pid = single_pid(adb('shell', 'pidof', PACKAGE))
+        pid = single_pid(adb('shell', 'pidof', args.package), args.package)
         if pid is None:
             raise ValueError('Expected one running game process')
         device = {key: adb('shell', 'getprop', key) for key in (
             'ro.product.model', 'ro.build.version.release', 'ro.build.fingerprint', 'ro.product.cpu.abi')}
         device['page_size'] = int(adb('shell', 'getconf', 'PAGE_SIZE'))
-        apk_path = adb('shell', 'pm', 'path', PACKAGE)
+        apk_path = adb('shell', 'pm', 'path', args.package)
         if not apk_path.startswith('package:') or '\n' in apk_path:
             raise ValueError('Expected one installed APK')
         device['installed_apk_sha256'] = adb('shell', 'sha256sum', apk_path[8:]).split()[0]
@@ -108,7 +109,7 @@ def main() -> None:
         start = time.monotonic()
         while time.monotonic() - start < args.seconds:
             time.sleep(.25)
-        final_pid = adb('shell', 'pidof', PACKAGE)
+        final_pid = adb('shell', 'pidof', args.package)
         log = adb('logcat', '-d', f'--pid={pid}')
         (output / 'engine.log').write_text(log + '\n')
         if parse_pids(final_pid) != (pid,):

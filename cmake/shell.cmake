@@ -92,7 +92,8 @@ if(ANDROID)
     add_library(sc64_app SHARED "${SC64_ROOT}/native/shell/app.cpp" "${SC64_ROOT}/native/android/platform.cpp")
     set_target_properties(sc64_app PROPERTIES OUTPUT_NAME main)
     target_compile_definitions(sc64_shell PRIVATE
-        SC64_PRIVATE_ROOT="/data/data/com.nomadic.sc64.personal/files")
+        SC64_PRIVATE_ROOT="/data/data/${SC64_ANDROID_PACKAGE}/files")
+    target_compile_definitions(sc64_app PRIVATE SC64_APP_ID="${SC64_ANDROID_PACKAGE}")
     # SDLActivity loads only libmain.so: keep SDL's JNI entry points from the
     # static archive and export them.
     target_link_libraries(sc64_app PRIVATE sc64_shell "$<LINK_LIBRARY:WHOLE_ARCHIVE,SDL3::SDL3-static>" aaudio log android)

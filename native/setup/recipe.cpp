@@ -1,4 +1,5 @@
 #include "recipe.hpp"
+#include "read_bytes.hpp"
 #include "process.hpp"
 #include "sha.hpp"
 #include <algorithm>
@@ -27,9 +28,9 @@ std::string lower(std::string text) {
 }
 
 std::string read_file(const std::filesystem::path& path) {
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream) throw SetupError("Cannot read " + path_utf8(path));
-    return std::string(std::istreambuf_iterator<char>(stream), {});
+    auto bytes = sc64::runtime::read_bytes(path);
+    if (!bytes) throw SetupError("Cannot read " + path_utf8(path));
+    return std::move(*bytes);
 }
 
 void write_file(const std::filesystem::path& path, std::string_view bytes) {

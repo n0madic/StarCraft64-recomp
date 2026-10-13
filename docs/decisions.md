@@ -2287,3 +2287,71 @@ passes the pinned NDK of the APK build when the SDK has it.
 files directory by the app itself (external storage cannot be loaded from, so an `adb push` or a file
 picker only stages it). Open: the shell side (Android build without `SC64_STATIC_GAME`, import and receipt
 check of the module, first-run guidance) and loading the real module on a device, listed in D-062.
+
+## ADR-090 — The Android launcher APK loads the game module from private storage (ACCEPTED, personal build only)
+
+**Context:** ADR-089 builds `sc64-game.so` for arm64 on the user's computer. The default Android build
+(`make build-android`) still links the generated game statically into `libmain.so` (ADR-086) and stays the
+default. A second APK that holds no game code is the Android counterpart of the desktop launcher
+(ADR-088): it needs the same shell with `SC64_STATIC_GAME=OFF`, a way to hand it the module and its own
+identity so that it can live beside the personal APK. Measured on a Samsung SM-F966B (Android 16, 4 KiB pages,
+targetSdk 36) with a debuggable build: the linker namespace refuses `dlopen` from
+`/storage/emulated/0/Android/data/<pkg>/files` ("not accessible for the namespace"), `dlopen` from the
+app's internal `files/` works (ADR-089), and a folder created there with `adb shell mkdir` belongs to the
+shell user, so the app gets `Permission denied` on it, while a file pushed straight into the app-created
+`files/` folder is readable and removable by the app. (`std::filesystem::status` also reports
+`No such file or directory` for a missing file with the NDK's libc++, so absence is read from the file
+type, not from the error code.)
+
+**Decision:** `tools/android/build.py --launcher` (`make build-android-launcher`) builds
+`local/dist/StarCraft64-android-launcher.apk` from `native/android` with `-DSC64_STATIC_GAME=OFF`: no game
+validation, no generated C and no `sc64_game` library are needed. The application ID is
+`com.nomadic.sc64.launcher` (label "StarCraft 64 Launcher"; saves and the ROM copy are separate from the
+personal APK) and the launcher icon is the neutral `SC64` one (`neutral_icon.py`), never the game-derived
+icon; `--bundle-rom` is refused. `game::load` first runs `install_staged`: a `sc64-game.so` found in the app's
+external files folder (`SDL_GetAndroidExternalStoragePath`) is copied to `<private>/game/sc64-game.so`
+(read-only, atomically replaced; an identical copy only deletes the staged file) and then loaded as on
+the desktop, with ABI, struct layout and ROM SHA-1 checks. When no module exists the on-screen message
+names the folder and the command that builds it. `make push-android-module SERIAL=...` pushes the module of
+`make setup-game MODULE_TARGET=android-arm64` into that folder (the app must have run once to create it).
+`ANDROID_LAUNCHER=1` makes `install-android`, `run-android`, `smoke-android`, `audio-android` and `check-apk`
+use the launcher APK and its package. The APK is still signed with the personal debug key.
+
+**Consequences:** The default `make build-android` is unchanged. The launcher APK is a personal artifact
+until the notices of ADR-088 (GPL texts, SOURCE.txt) and a distribution key exist (D-063). There is no
+in-app import of the module (no file picker for it) and no in-app build; a computer with the ROM is
+required to make the module. Only one module is kept per app and it is not rebuilt when the application
+changes: an ABI change is reported by the loader as "rebuild the game module".
+
+*Device result (2026-10-13).* On a Samsung SM-F966B (Android 16) the release launcher built for OpenGL ES passes
+`smoke-android` with Home/return (about 60 VI fields/s, PCM, guest frozen and resumed, no crash). The Vulkan
+build crashed once on its first Home/return in SDL's `VULKAN_HandleDeviceLost` (D-053); later Vulkan repeats were invalid
+(screen off, adb dropped), so it is not shown to be reproducible and is unrelated to the module code.
+
+*Security note (automated review, 2026-10-13).* The staged file is code that the app loads. On Android 11 and
+newer other apps cannot write `Android/data/<pkg>`, so only `adb`/the user can stage it, which already
+allows installing anything; on Android 10 and older any app with the storage permission could, so the
+loader imports nothing from shared storage there (`SDL_GetAndroidSDKVersion() < 30`) and says so. The module
+is not signed or digest-pinned: it is the user's own build of the user's own ROM, and the ROM SHA-1, ABI and
+struct layout checks guard against mistakes, not against an attacker with write access to the private folder.
+
+**Amendment to ADR-089 and ADR-090 (2026-10-13, code review of the Android series):**
+- *Receipt.* `sources_sha256` also covers the link arguments and, for Android, the NDK driver's
+  `--target=aarch64-linux-androidNN` (so the API level): changing them rebuilds an existing module. Modules built before this
+  amendment are rebuilt once.
+- *Reproducible module.* Compiles pass `-ffile-prefix-map` for the generated and module source directories, so the
+  temporary work directory (`work-<stamp>`) and the user's paths no longer end up in assert strings; two builds of the same
+  inputs are byte-identical (checked with the real game for Android). The Android link adds `-Wl,--no-undefined`.
+- *NDK.* `find_ndk` takes the first candidate that holds a clang driver; `--use-zig` with `--target android-arm64` is an
+  error instead of being ignored.
+- *Import.* `install_staged` replaces the module with one `rename` (a failure keeps the old module; Windows removes it first),
+  a staged module that cannot be imported is logged and reported but does not stop an installed module from loading, a failed
+  `chmod` is logged, and the loader ignores a base path that is not absolute (SDL reports `./` on Android). The external folder
+  is created at startup (`prepare_staging`), not when a ROM is first chosen. A ROM chosen while the module is missing is
+  stored anyway, so that after `push-android-module` the app starts without choosing it again.
+- *Launcher APK.* Both labels (application and activity, which the home screen shows) are "StarCraft 64 Launcher".
+  `check_apk.audit(launcher=True)` (`check-apk --launcher`, and `run.py` for the launcher package) fails an APK that links the
+  recompiled game (markers `recomp_entrypoint`, `sc64_resident_8000B988`) or carries a ROM, and every receipt records
+  `content_audit.game_code_linked`. `$ANDROID_LAUNCHER` selects the APK of install/run/smoke/audio/check-apk only;
+  `build-android` and `build-android-opengles` always build the personal APK. `push-android-module` tells an adb failure from a
+  missing folder. Tests tie `kAndroidApi`, the target list and the application ID copies to their Python counterparts.

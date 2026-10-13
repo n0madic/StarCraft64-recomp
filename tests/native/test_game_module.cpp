@@ -4,7 +4,9 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <thread>
+#include "read_bytes.hpp"
 
 namespace game = sc64::desktop::game;
 namespace {
@@ -30,15 +32,74 @@ struct Terminated {};
 void throw_terminated() { throw Terminated{}; }
 }
 
+std::string slurp(const std::filesystem::path& file) { return sc64::runtime::read_bytes(file).value_or(std::string()); }
+void spit(const std::filesystem::path& file, const std::string& text) {
+    std::filesystem::create_directories(file.parent_path());
+    std::ofstream(file, std::ios::binary) << text;
+}
+
+// A module pushed to the Android app's external folder is moved into the storage folder before loading.
+void test_install_staged() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / ("sc64-game-module-test-" + std::to_string(std::rand()));
+    fs::remove_all(root);
+    const fs::path staged = root / "staged", storage = root / "storage";
+    const fs::path source = staged / game::module_file_name(), target = storage / "game" / game::module_file_name();
+    CHECK(!game::install_staged(staged, storage) && !game::install_staged({}, storage));  // nothing staged
+    spit(source, "module one");
+    CHECK(game::install_staged(staged, storage));
+    CHECK(!fs::exists(source) && slurp(target) == "module one");
+#if !defined(_WIN32)
+    CHECK((fs::status(target).permissions() & fs::perms::owner_write) == fs::perms::none);  // loaded code is read-only
+#endif
+    spit(source, "module one");  // the same bytes again: only the staged copy goes away
+    CHECK(!game::install_staged(staged, storage) && !fs::exists(source) && slurp(target) == "module one");
+    spit(source, "module two");  // a new one replaces the old read-only file
+    CHECK(game::install_staged(staged, storage) && slurp(target) == "module two" && !fs::exists(source));
+    spit(source, "");
+    try {
+        game::install_staged(staged, storage);
+        CHECK(false);
+    } catch (const game::ModuleError& error) {
+        CHECK(std::string(error.what()).find("empty") != std::string::npos);
+    }
+    CHECK(slurp(target) == "module two");
+    std::error_code ignored;
+    fs::permissions(target, fs::perms::owner_all, ignored);
+    fs::remove_all(root, ignored);
+}
+
+// The Android-only decisions are pure functions, so they are checked here.
+void test_staging_policy() {
+    namespace fs = std::filesystem;
+    CHECK(game::staging_directory(30, "/sdcard/Android/data/app/files") == fs::path("/sdcard/Android/data/app/files"));
+    CHECK(game::staging_directory(36, "/x") == fs::path("/x"));
+    CHECK(game::staging_directory(29, "/x").empty() && game::staging_directory(28, "/x").empty());  // other apps could write it
+    CHECK(game::staging_directory(34, nullptr).empty() && game::staging_directory(34, "").empty());
+    const std::vector<fs::path> places = {"/data/game/sc64-game.so"};
+    const auto android = game::missing_message(places, "/sdcard/files", false, "");
+    for (const char* part : {"was not found", "/data/game/sc64-game.so", "make setup-game MODULE_TARGET=android-arm64", "/sdcard/files", "adb push"})
+        CHECK(android.find(part) != std::string::npos);
+    const auto old_android = game::missing_message(places, {}, true, "");
+    CHECK(old_android.find("Android 11") != std::string::npos && old_android.find("adb push") == std::string::npos);
+    const auto desktop = game::missing_message(places, {}, false, "");
+    CHECK(desktop.find("docs/desktop.md") != std::string::npos && desktop.find("Android") == std::string::npos);
+    CHECK(game::missing_message(places, "/sdcard/files", false, "Cannot access the staged module").find("Cannot access the staged module") != std::string::npos);
+    // SDL reports "./" as the base path on Android: not a place to load code from.
+    CHECK(game::candidates("/storage", "./", "").size() == 1 && game::candidates("/storage", "", "").size() == 1);
+    CHECK(game::candidates("/storage", std::filesystem::absolute("/app/"), "").size() == 2);
+}
+
 int main(int argc, char** argv) {
     if (argc != 8) { std::fprintf(stderr, "usage: good bad_abi bad_layout bad_rom refuse no_init missing\n"); return 2; }
     const std::filesystem::path good = argv[1];
 
     // Search order and file name.
-    const auto places = game::candidates("/storage", "/app/resources/", "/custom/module");
+    const auto app = std::filesystem::absolute("/app/resources/");  // a drive-less path is not absolute on Windows
+    const auto places = game::candidates("/storage", app, "/custom/module");
     CHECK(places.size() == 3);
     CHECK(places[0] == std::filesystem::path("/custom/module"));
-    CHECK(places[1] == std::filesystem::path("/app/resources/") / game::module_file_name());
+    CHECK(places[1] == app / game::module_file_name());
     CHECK(places[2] == std::filesystem::path("/storage") / "game" / game::module_file_name());
     CHECK(game::candidates("", "", "").empty());
 
@@ -54,6 +115,9 @@ int main(int argc, char** argv) {
 #undef SC64_IMPORT_V
 #undef SC64_IMPORT_R
     CHECK(imports > 60 && missing == 0);
+
+    test_install_staged();
+    test_staging_policy();
 
     // A good module loads, validates and its function pointers work.
     const Sc64ModuleInfo& info = game::load_file(good, rom);

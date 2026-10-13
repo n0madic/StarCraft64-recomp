@@ -1,4 +1,5 @@
 #include "native.hpp"
+#include "game_module.hpp"
 #include "audio.hpp"
 #include "log.hpp"
 #include "platform.hpp"
@@ -28,6 +29,7 @@ void Native::initialize() {
     storage_ = config_.string("sc64.storage");
     if (storage_.empty()) storage_ = sc64_storage_path();
     sc64_platform_initialize(storage_);
+    desktop::game::prepare_staging();  // Android launcher: the folder for `adb push` must exist before a ROM is chosen
     static std::string backend;
     backend = config_.string("sc64.audio_backend", "aaudio");
     desktop::audio::configure(backend.c_str());

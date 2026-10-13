@@ -13,15 +13,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from private_paths import require_local
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_apk
-from adb_client import ADB_TRANSFER_TIMEOUT, PACKAGE, device_command, parse_pids, single_pid
+from adb_client import ACTIVITY_CLASS, ADB_TRANSFER_TIMEOUT, LAUNCHER_PACKAGE, PACKAGE, device_command, parse_pids, single_pid
 
 ROOT = Path(__file__).resolve().parents[2]
-ACTIVITY = PACKAGE + '/com.nomadic.sc64.Sc64Activity'
+ACTIVITY = PACKAGE + '/' + ACTIVITY_CLASS
 # SDL renderer names; the shell reports the active one as render_driver.
 BACKENDS = {'opengles': 'opengles2', 'vulkan': 'vulkan'}
 
-def activity_command(backend: str | None) -> list[str]:
-    command=['shell','am','start','-n',ACTIVITY]
+def activity_command(backend: str | None, package: str = PACKAGE) -> list[str]:
+    command=['shell','am','start','-n',f'{package}/{ACTIVITY_CLASS}']
     if backend:
         if backend not in BACKENDS: raise ValueError('Unknown graphics backend')
         # Sc64Activity.getArguments() forwards this string array to the shell.
@@ -105,6 +105,7 @@ def validate_receipt(report: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--serial', required=True)
+    parser.add_argument('--package', default=PACKAGE, help='Application ID of the installed app (default: the personal APK)')
     parser.add_argument('--adb', default='adb', help='adb executable (default: PATH)')
     parser.add_argument('--apk', type=Path, default=ROOT / 'local/dist/StarCraft64-android.apk')
     parser.add_argument('--output', type=Path, required=True)
@@ -122,18 +123,18 @@ def main() -> None:
     if args.home and args.seconds < 30: raise ValueError('Home/return requires at least 30 seconds for post-return telemetry')
     adb = device_command(args.adb, args.serial)
     def read_pid() -> str:
-        try: return adb('shell','pidof',PACKAGE)
+        try: return adb('shell','pidof',args.package)
         except subprocess.CalledProcessError as error:
             if error.returncode != 1: raise
             return ''
-    audit=check_apk.audit(args.apk, bundled_rom=args.bundled_rom)
+    audit=check_apk.audit(args.apk, bundled_rom=args.bundled_rom, launcher=args.package == LAUNCHER_PACKAGE)
     output.mkdir(parents=True)
     device={key:adb('shell','getprop',key) for key in (
         'ro.product.model','ro.build.version.release','ro.build.fingerprint','ro.product.cpu.abi','ro.kernel.qemu')}
     device['page_size']=int(adb('shell','getconf','PAGE_SIZE'))
     validate_profile(device,args.required_page_size)
     if args.install: adb('install','-r',str(args.apk.resolve()),timeout=ADB_TRANSFER_TIMEOUT)
-    installed_path=adb('shell','pm','path',PACKAGE).removeprefix('package:')
+    installed_path=adb('shell','pm','path',args.package).removeprefix('package:')
     installed=output / 'installed.apk'
     adb('pull',installed_path,str(installed),timeout=ADB_TRANSFER_TIMEOUT)
     if hashlib.sha256(installed.read_bytes()).hexdigest()!=audit['apk_sha256']:
@@ -141,13 +142,13 @@ def main() -> None:
     installed.unlink()
     # PID reuse and retained log buffers must not borrow an earlier run's proof.
     log_start=adb('shell',"date '+%m-%d %H:%M:%S.000'")
-    start_command=activity_command(args.backend)
-    adb('shell','am','force-stop',PACKAGE)
+    start_command=activity_command(args.backend, args.package)
+    adb('shell','am','force-stop',args.package)
     adb(*start_command)
     pid=None
     deadline=time.monotonic()+10
     while pid is None and time.monotonic()<deadline:
-        pid = single_pid(read_pid())
+        pid = single_pid(read_pid(), args.package)
         if pid is None: time.sleep(.2)
     if pid is None: raise ValueError('Android app did not start')
     start=time.monotonic(); hidden=False; returned=False

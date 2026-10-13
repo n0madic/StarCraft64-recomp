@@ -17,6 +17,9 @@ ROM_MAGIC = frozenset(MAGIC_FORMATS)
 ENGINE_MEMBER = 'lib/arm64-v8a/libmain.so'
 ROM_MEMBER = 'assets/sc64/sc64-ntsc-u.z64'
 ROM_SIZE = 0x2000000
+# Names only the recompiled game defines (its entry point and the minimap setter, game_static.cpp). The engine is
+# linked with --strip-debug, which keeps them in the symbol table of a build that contains the game.
+GAME_CODE_MARKERS = (b'recomp_entrypoint', b'sc64_resident_8000B988')
 
 def validate_bundled_rom(payload: bytes) -> str:
     if len(payload) != ROM_SIZE or payload[:4] != b'\x80\x37\x12\x40':
@@ -52,8 +55,15 @@ def elf_segments(data: bytes) -> list[dict]:
     if not any(item['kind'] == 'LOAD' for item in segments): raise ValueError('No ELF LOAD segments')
     return segments
 
-def audit(apk: Path, engine: Path | None = None, *, bundled_rom: bool = False) -> dict:
+def contains_game_code(payload: bytes) -> bool:
+    return any(marker in payload for marker in GAME_CODE_MARKERS)
+
+def audit(apk: Path, engine: Path | None = None, *, bundled_rom: bool = False, launcher: bool = False) -> dict:
+    """`launcher` asserts the APK of ADR-090: no ROM and no recompiled game linked into its libraries."""
+    if launcher and bundled_rom:
+        raise ValueError('The launcher APK never contains a ROM')
     libraries = {}
+    game_code = False
     with ZipFile(apk) as archive, apk.open('rb') as raw:
         if len(set(archive.namelist())) != len(archive.namelist()): raise ValueError('Duplicate APK members')
         for item in archive.infolist():
@@ -75,6 +85,9 @@ def audit(apk: Path, engine: Path | None = None, *, bundled_rom: bool = False) -
             data_offset = item.header_offset + 30 + namesize + extrasize
             if item.compress_type == ZIP_STORED and data_offset % 16384:
                 raise ValueError(f'Uncompressed ELF is not 16 KiB ZIP aligned: {name}')
+            if contains_game_code(payload):
+                game_code = True
+                if launcher: raise ValueError(f'The launcher APK links the recompiled game: {name}')
             libraries[name] = {'sha256': hashlib.sha256(payload).hexdigest(), 'segments': segments,
                                'compressed': item.compress_type != ZIP_STORED, 'data_offset': data_offset}
         if ENGINE_MEMBER not in libraries: raise ValueError(f'APK lacks the game engine: {ENGINE_MEMBER}')
@@ -85,6 +98,7 @@ def audit(apk: Path, engine: Path | None = None, *, bundled_rom: bool = False) -
         raise ValueError('APK engine does not match the local link')
     return {'schema': 2, 'apk_sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
             'libraries': libraries, 'alignment_16k': True, 'rom_included': bundled_rom,
+            'game_code_linked': game_code, 'launcher': launcher,
             'rom_sha1': ROM_SHA1 if bundled_rom else None,
             'on_device_accepted': False}
 
@@ -93,7 +107,8 @@ def main() -> None:
     parser.add_argument('apk', type=Path)
     parser.add_argument('--engine', type=Path)
     parser.add_argument('--bundled-rom', action='store_true', help='Require the single verified personal ROM asset')
+    parser.add_argument('--launcher', action='store_true', help='Require an APK without ROM and without the recompiled game (ADR-090)')
     args = parser.parse_args()
-    print(json.dumps(audit(args.apk, args.engine, bundled_rom=args.bundled_rom), indent=2))
+    print(json.dumps(audit(args.apk, args.engine, bundled_rom=args.bundled_rom, launcher=args.launcher), indent=2))
 
 if __name__ == '__main__': main()

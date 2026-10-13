@@ -356,8 +356,12 @@ class SourceTests(unittest.TestCase):
         self.assertNotIn('installed_icon', source)
         self.assertNotIn('generated/game', source)
 
-    def test_android_still_selects_the_static_game(self):
-        self.assertIn('set(SC64_STATIC_GAME ON)', (ROOT / 'native/android/CMakeLists.txt').read_text())
+    def test_android_selects_the_static_game_unless_the_launcher_is_requested(self):
+        # The personal APK (the default) links the game; only `--launcher` turns that off (ADR-090).
+        self.assertIn('option(SC64_STATIC_GAME "Link the generated game statically" ON)', (ROOT / 'native/android/CMakeLists.txt').read_text())
+        build = (ROOT / 'tools/android/build.py').read_text()
+        self.assertIn('-DSC64_STATIC_GAME={"OFF" if args.launcher else "ON"}', build)
+        self.assertIn("if not args.launcher:\n        validate_ui_hooks", build)
 
     def test_build_paths_are_not_embedded(self):
         self.assertIn('-ffile-prefix-map=', (ROOT / 'tools/desktop/package.py').read_text())

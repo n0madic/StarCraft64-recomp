@@ -76,11 +76,10 @@ int main(int argc, char** argv) {
             if (options.recompiler.empty()) options.recompiler = here / ("N64Recomp" + host_info().exe_suffix);
         }
         if (options.target && options.target->os == "android" && !options.ndk) {
-            const auto candidates = ndk_candidates(host_info(), [](const char* name) {
+            options.ndk = find_ndk(host_info(), [](const char* name) {
                 const char* value = std::getenv(name);
                 return std::string(value ? value : "");
             });
-            if (!candidates.empty()) options.ndk = candidates.front();
         }
         Reporter report;
         report.step = [](int step, int total, const std::string& text) { std::printf("[%d/%d] %s\n", step, total, text.c_str()); std::fflush(stdout); };

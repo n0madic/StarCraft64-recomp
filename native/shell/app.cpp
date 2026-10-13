@@ -18,6 +18,10 @@
 #include <string>
 #include <utility>
 
+#ifndef SC64_APP_ID
+#define SC64_APP_ID "com.nomadic.sc64.personal"
+#endif
+
 namespace {
 using namespace sc64::shell;
 
@@ -152,7 +156,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char* argv[]) {
         }
 #endif
         app->config.parse_arguments(argc, argv);
-        SDL_SetAppMetadata("StarCraft 64", "1.0", "com.nomadic.sc64.personal");
+        SDL_SetAppMetadata("StarCraft 64", "1.0", SC64_APP_ID);
         // Touch and mouse stay separate sources; the adapters own aliasing.
         SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
         SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");

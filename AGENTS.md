@@ -63,6 +63,8 @@ User-facing discussion is normally Russian. All project documentation is English
 - `native/module/`: the game-module ABI (`sc64_module.h`, `sc64_imports.def`), `module_main.c`
   and the shim `librecomp/sections.h`; the generated C is built into `sc64-game.*` (ADR-086).
 - `native/android/`: NDK profile, manifest, `Sc64Activity` and haptics JNI helper.
+  `make build-android` links the game statically (default); `make build-android-launcher` builds the APK
+  without game code that loads the module of `sc64_setup --target android-arm64` (ADR-090).
 - `cmake/`: shared shell build (`shell.cmake`) and cross toolchain files.
 - `tools/sc64.py` (cross-platform command entry point, ADR-082) and `tools/hostenv.py`
   (host detection and tool discovery); `tools/{research,recompile,renderer,desktop,input,android}/`:

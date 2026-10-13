@@ -71,6 +71,18 @@ Session& session() { static Session value; return value; }
 // quit()/join() would wait for that same thread, and other translation units'
 // runtime statics have no ordering guarantee here. Only release our handle.
 Session::~Session() { if (worker_.joinable()) worker_.detach(); }
+namespace {
+// Picker imports survive cold starts. Packaged ROMs (APK assets, AppImage) already have persistent
+// storage, so that path never creates a second ROM file.
+void persist_rom(const std::vector<std::uint8_t>& rom, const std::filesystem::path& storage) {
+    const auto temporary = storage / ".sc64-rom.tmp";
+    std::ofstream output(temporary, std::ios::binary);
+    output.exceptions(std::ios::failbit | std::ios::badbit);
+    output.write(reinterpret_cast<const char*>(rom.data()), rom.size());
+    output.close();
+    std::filesystem::rename(temporary, storage / "sc64-ntsc-u.z64");
+}
+}
 void Session::load(const std::filesystem::path& path, const std::filesystem::path& storage) {
     if (launched_) throw std::runtime_error("Runtime supports one session per process; restart to change ROM");
     std::vector<std::uint8_t> rom(runtime::rom_size);
@@ -112,22 +124,20 @@ void Session::launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::p
             return;
         }
 #endif
+        // The ROM was validated: keep it, so that a module pushed to the device later starts without choosing it again.
+        if (persist) {
+            try {
+                std::filesystem::create_directories(storage);
+                persist_rom(rom, storage);
+            } catch (const std::exception&) {}
+        }
         throw;
     }
     std::filesystem::create_directories(storage);
     // Validate every user-owned input before process-wide side effects. The
     // save image may be malformed; failing here leaves no audio device open.
     runtime::flash_device().initialize(storage / "sc64.fla");
-    if (persist) {
-        // Picker imports survive cold starts. Packaged ROMs (APK assets, AppImage)
-        // already have persistent storage, so that path never creates a second ROM file.
-        const auto temporary = storage / ".sc64-rom.tmp";
-        std::ofstream output(temporary, std::ios::binary);
-        output.exceptions(std::ios::failbit | std::ios::badbit);
-        output.write(reinterpret_cast<const char*>(rom.data()), rom.size());
-        output.close();
-        std::filesystem::rename(temporary, storage / "sc64-ntsc-u.z64");
-    }
+    if (persist) persist_rom(rom, storage);
     audio::initialize();
     try {
         start_runtime(std::move(rom), storage);

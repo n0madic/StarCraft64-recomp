@@ -22,7 +22,9 @@ SERIAL ?=
 ANDROID_SDK ?=
 # Empty builds/uses the Vulkan APK; opengles2 selects the emulator variant (D-053).
 ANDROID_RENDER_DRIVER ?=
-APK ?= local/dist/StarCraft64-android$(if $(filter opengles2,$(ANDROID_RENDER_DRIVER)),-opengles2).apk
+# 1 selects the launcher APK without game code (ADR-089) for install/run/smoke/check-apk/push-android-module.
+ANDROID_LAUNCHER ?= 0
+APK ?= local/dist/StarCraft64-android$(if $(filter 1,$(ANDROID_LAUNCHER)),-launcher)$(if $(filter opengles2,$(ANDROID_RENDER_DRIVER)),-opengles2).apk
 STORAGE ?= local/private/desktop/default
 REPORT ?=
 RUN_SECONDS ?= 0
@@ -45,11 +47,11 @@ SC64 = $(PYTHON) tools/sc64.py
 DOCKER_FLAG = $(if $(filter 1,$(DOCKER)),--docker)
 export ALLOW_DIRTY ANALYSIS DATA_DIR FORCE USE_ZIG MODULE_TARGET NDK RECOMPILER_TARGET ROM BUNDLE_ROM RECOMP_PYTHON SERIAL ADB ANDROID_SDK APK STORAGE REPORT RUN_SECONDS SMOKE_SECONDS JOBS
 export BASELINE_REPLAY RENDERER_MANIFEST
-export PAGE_SIZE ANDROID_BACKEND ANDROID_DEBUGGABLE ANDROID_RENDER_DRIVER BUILD_TYPE
+export PAGE_SIZE ANDROID_BACKEND ANDROID_DEBUGGABLE ANDROID_RENDER_DRIVER ANDROID_LAUNCHER BUILD_TYPE
 
 # `make build-desktop`/`run-desktop`/`configure-desktop` are the older names of build/run/configure.
 .PHONY: help doctor venv bootstrap inventory recompile recipe-verify recipe-export setup-game package package-macos package-linux package-windows build-recompiler verify-recompiler build build-macos build-desktop configure-desktop run run-desktop build-windows build-linux build-appimage \
-        build-android build-android-opengles icon configure-android check-apk devices install-android \
+        build-android build-android-opengles build-android-launcher push-android-module icon configure-android check-apk devices install-android \
         run-android smoke-android audio-android benchmark-renderer test test-python test-native
 
 help:
@@ -76,6 +78,9 @@ help:
 	  '  BUNDLE_ROM=1 ROM="/path/game.z64" includes ROM and autostarts from APK assets' \
 	  'BUILD_TYPE=Release|RelWithDebInfo|Debug   CMake build type of app builds (default Release)' \
 	  '  ANDROID_DEBUGGABLE=1 packages a debuggable APK (default: release, no run-as access)' \
+	  'make build-android-launcher  APK without game code (local/dist/StarCraft64-android-launcher.apk, own app ID); it loads the module' \
+	  '  of `make setup-game MODULE_TARGET=android-arm64`: make push-android-module SERIAL=... [DATA_DIR=...]; pass ANDROID_LAUNCHER=1' \
+	  '  to install/run/smoke/check-apk to use the launcher instead of the personal APK' \
 	  'make build-android-opengles Same with OpenGL ES for emulators (local/dist/StarCraft64-android-opengles2.apk);' \
 	  '  pass ANDROID_RENDER_DRIVER=opengles2 to install/run/smoke/check-apk to use that APK' \
 	  'make icon ROM="/path/game.z64"  Convert the original title art into local/icons (used by every build)' \
@@ -174,6 +179,12 @@ build-android:
 
 build-android-opengles:
 	$(SC64) build-android-opengles
+
+build-android-launcher:
+	$(SC64) build-android-launcher
+
+push-android-module:
+	$(SC64) push-android-module
 
 configure-android:
 	$(SC64) configure-android

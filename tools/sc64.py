@@ -48,7 +48,7 @@ EMULATOR = ROOT / 'local/toolchains/ares-build/test-runner/ares-test'
 MODULE_TARGETS = ('android-arm64',)  # native/setup/toolchain.cpp target_names()
 RENDER_DRIVERS = ('vulkan', 'opengles2')  # tools/android/build.py RENDER_DRIVERS
 EMULATOR_DRIVER_LINE = re.compile(rb'^sc64\.render_driver = opengles2$', re.MULTILINE)
-ACTIVITY = adb_client.PACKAGE + '/com.nomadic.sc64.Sc64Activity'
+ACTIVITY = adb_client.PACKAGE + '/' + adb_client.ACTIVITY_CLASS
 
 Command = list[str]
 
@@ -159,10 +159,15 @@ def setup_game_commands(host: Host, args: argparse.Namespace) -> list[Command]:
              *(['--use-zig'] if args.use_zig else []), *(['--force'] if args.force else [])]]
 
 
+def android_package(args: argparse.Namespace) -> str:
+    return adb_client.LAUNCHER_PACKAGE if args.launcher else adb_client.PACKAGE
+
+
 def apk_path(args: argparse.Namespace) -> Path:
     if args.apk:
         return args.apk
-    return ROOT / 'local/dist' / f'StarCraft64-android{"-opengles2" if args.render_driver == "opengles2" else ""}.apk'
+    name = f'StarCraft64-android{"-launcher" if args.launcher else ""}{"-opengles2" if args.render_driver == "opengles2" else ""}.apk'
+    return ROOT / 'local/dist' / name
 
 
 def require_serial(args: argparse.Namespace) -> str:
@@ -179,8 +184,12 @@ def build_android_commands(host: Host, args: argparse.Namespace) -> list[Command
     options: list[str | Path] = []
     if args.sdk:
         options += ['--sdk', args.sdk]
+    if args.launcher and args.bundle_rom:
+        raise UsageError('The launcher APK never contains a ROM; use BUNDLE_ROM=1 with build-android.')
     if args.bundle_rom:
         options += ['--bundle-rom', require_rom(args.rom, 'BUNDLE_ROM=1')]
+    if args.launcher:
+        options.append('--launcher')
     if args.render_driver:
         options += ['--render-driver', args.render_driver]
     if args.debuggable:
@@ -194,7 +203,8 @@ def configure_android_commands(host: Host, args: argparse.Namespace) -> list[Com
 
 
 def check_apk_commands(host: Host, args: argparse.Namespace) -> list[Command]:
-    return [script('android/check_apk.py', apk_path(args), *(['--bundled-rom'] if args.bundle_rom else []))]
+    return [script('android/check_apk.py', apk_path(args), *(['--bundled-rom'] if args.bundle_rom else []),
+                   *(['--launcher'] if args.launcher else []))]
 
 
 def install_android(host: Host, args: argparse.Namespace) -> int:
@@ -211,11 +221,39 @@ def install_android(host: Host, args: argparse.Namespace) -> int:
     return execute([adb(args, 'install', '-r', apk)])
 
 
+def default_data_dir(host: Host) -> Path:
+    """Where sc64_setup keeps the game by default (SDL_GetPrefPath for organisation "" and app StarCraft64)."""
+    if host.system == 'darwin':
+        return Path.home() / 'Library/Application Support/StarCraft64'
+    if host.system == 'windows':
+        return Path(os.environ.get('APPDATA') or Path.home() / 'AppData/Roaming') / 'StarCraft64'
+    return Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share') / 'StarCraft64'
+
+
+def push_android_module(host: Host, args: argparse.Namespace) -> int:
+    """Stage the module built by `setup-game --module-target android-arm64` in the launcher's external files
+    folder; the app moves it into its private storage at the next start (a module cannot be loaded from there).
+    The file goes into the folder itself: a subfolder made by adb belongs to the shell user and the app cannot read it."""
+    module = (args.data_dir or default_data_dir(host)) / 'game-android-arm64' / 'sc64-game.so'
+    if not module.is_file():
+        raise UsageError(f'{module} not found: run `make setup-game MODULE_TARGET=android-arm64 ROM=...` first')
+    folder = f'/sdcard/Android/data/{adb_client.LAUNCHER_PACKAGE}/files'
+    require_serial(args)
+    probe = subprocess.run(adb(args, 'shell', f'test -d {folder} && echo present || echo absent'), capture_output=True, text=True)
+    if probe.returncode != 0 or probe.stdout.strip() not in ('present', 'absent'):
+        raise UsageError(f'adb could not reach the device {args.serial}: {(probe.stderr or probe.stdout).strip() or "no answer"}')
+    if probe.stdout.strip() == 'absent':
+        raise UsageError(f'{folder} does not exist: install the launcher (`make install-android ANDROID_LAUNCHER=1`) and start it '
+                         'once, so that the app creates its own folder (one made by adb is not readable by the app).')
+    return execute([adb(args, 'push', module, f'{folder}/sc64-game.so')])
+
+
 def run_android_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     options = []
     if args.render_driver:
         options = ['--esa', 'com.nomadic.sc64.ARGUMENTS', f'--config=sc64.render_driver={args.render_driver}']
-    return [adb(args, 'shell', 'am', 'start', '-n', ACTIVITY, *options)]
+    activity = f'{android_package(args)}/{adb_client.ACTIVITY_CLASS}'
+    return [adb(args, 'shell', 'am', 'start', '-n', activity, *options)]
 
 
 def smoke_android_commands(host: Host, args: argparse.Namespace) -> list[Command]:
@@ -227,13 +265,15 @@ def smoke_android_commands(host: Host, args: argparse.Namespace) -> list[Command
     if args.backend:
         options += ['--backend', args.backend]
     report = args.report or ROOT / 'local/reports' / time.strftime('make-android-%Y%m%d-%H%M%S')
+    options += ['--package', android_package(args)]
     return [script('android/run.py', *options, '--adb', args.adb, '--serial', require_serial(args), '--apk', apk_path(args),
                    '--seconds', args.smoke_seconds, '--home', '--output', report)]
 
 
 def audio_android_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     report = args.report or ROOT / 'local/reports' / time.strftime('make-audio-%Y%m%d-%H%M%S')
-    return [script('android/audio_report.py', '--adb', args.adb, '--serial', require_serial(args), '--output', report)]
+    return [script('android/audio_report.py', '--adb', args.adb, '--serial', require_serial(args), '--package', android_package(args),
+                   '--output', report)]
 
 
 def recompile_python(host: Host, args: argparse.Namespace) -> Path:
@@ -397,6 +437,9 @@ def parser() -> argparse.ArgumentParser:
     android.add_argument('--adb', default=os.environ.get('ADB') or 'adb', help='adb executable (default: $ADB or PATH)')
     android.add_argument('--render-driver', choices=RENDER_DRIVERS, default=os.environ.get('ANDROID_RENDER_DRIVER') or None,
                          help='SDL renderer; opengles2 selects the emulator APK (D-053)')
+    android.add_argument('--launcher', action='store_true', default=env_flag('ANDROID_LAUNCHER'),
+                         help='the launcher APK without game code (ADR-089): build, install, run and probe it instead of the '
+                              'personal APK ($ANDROID_LAUNCHER=1)')
     android.add_argument('--debuggable', action='store_true', default=env_flag('ANDROID_DEBUGGABLE'),
                          help='package android:debuggable (run-as, debugger, `adb install -r -d` rollback)')
     android.add_argument('--apk', type=Path, default=Path(os.environ['APK']) if os.environ.get('APK') else None,
@@ -447,10 +490,16 @@ def parser() -> argparse.ArgumentParser:
     run = add('run', 'launch the existing desktop build for this host', run_commands)
     run.add_argument('--storage', type=Path, default=Path(os.environ.get('STORAGE', ROOT / 'local/private/desktop/default')))
     run.add_argument('--seconds', default=os.environ.get('RUN_SECONDS', '0'), help='0 = interactive')
-    add('build-android', 'arm64-v8a APK (Vulkan default, bundled ROM with --bundle-rom)', build_android_commands, android)
+    # Only build-android-launcher builds the launcher; $ANDROID_LAUNCHER selects the APK of the other android commands.
+    add('build-android', 'arm64-v8a APK (Vulkan default, bundled ROM with --bundle-rom)',
+        lambda h, a: build_android_commands(h, argparse.Namespace(**{**vars(a), 'launcher': False})), android)
     # Not set_defaults: parent parsers share their Action objects, so that would change every command.
     add('build-android-opengles', 'APK with OpenGL ES for emulators',
-        lambda h, a: build_android_commands(h, argparse.Namespace(**{**vars(a), 'render_driver': 'opengles2'})), android)
+        lambda h, a: build_android_commands(h, argparse.Namespace(**{**vars(a), 'render_driver': 'opengles2', 'launcher': False})), android)
+    add('build-android-launcher', 'launcher APK without game code; it loads a module from `setup-game --module-target android-arm64`',
+        lambda h, a: build_android_commands(h, argparse.Namespace(**{**vars(a), 'launcher': True})), android)
+    add('push-android-module', 'copy the Android game module of --data-dir to the launcher app on --serial',
+        push_android_module, android)
     add('configure-android', 'configure the NDK tree without packaging', configure_android_commands, android)
     add('check-apk', 'audit APK alignment and the private-data boundary', check_apk_commands, android)
     add('devices', 'list adb devices', lambda h, a: [[a.adb, 'devices', '-l']], android)

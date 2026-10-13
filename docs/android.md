@@ -838,3 +838,24 @@ commands, evidence and numerical limits. Expanded device and long Adreno/Mali
 performance/thermal checks are deferred by user scope. Stage 6 entry is permitted
 but no Stage 6 feature is implemented by this closure.
 (Superseded: Stage 6 was withdrawn by ADR-060 on 2026-10-09.)
+
+## Launcher APK without game code (2026-10-13, ADR-089/090)
+
+`make build-android` still links the generated game into the APK and remains the default. A second variant
+holds no game code and loads a module built on a computer:
+
+```sh
+make setup-game ROM="/path/to/your.z64" MODULE_TARGET=android-arm64   # <storage>/game-android-arm64/sc64-game.so
+make build-android-launcher                                            # local/dist/StarCraft64-android-launcher.apk
+make install-android ANDROID_LAUNCHER=1 SERIAL=DEVICE_SERIAL
+make run-android ANDROID_LAUNCHER=1 SERIAL=DEVICE_SERIAL               # creates the app's folders, shows how to continue
+make push-android-module SERIAL=DEVICE_SERIAL [DATA_DIR=...]
+```
+
+The launcher has its own application ID (`com.nomadic.sc64.launcher`), so it coexists with the personal
+APK and has separate saves and ROM storage. Choose your ROM in the app as usual. The pushed module goes
+to `/sdcard/Android/data/com.nomadic.sc64.launcher/files/sc64-game.so`; at the next start the app moves it into
+its private `files/game/` (the linker does not load code from shared storage) and loads it. Run
+`push-android-module` after the app has been started once: a folder created by `adb` is not readable by the app.
+Use `ANDROID_LAUNCHER=1` with `smoke-android`, `audio-android` and `check-apk` as for the personal APK.
+D-062 lists what has been verified (one phone, one session) and D-063 why the APK is not for distribution.

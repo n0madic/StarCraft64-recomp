@@ -49,6 +49,9 @@ std::vector<std::string> compile_args(const Toolchain& toolchain, const Platform
     for (auto& flag : compile_flags(target)) args.push_back(std::move(flag));
     if (target.os == "macos" && toolchain.kind != "zig") args.push_back("-mmacosx-version-min=13.0");
     args.push_back("-DSC64_MODULE_ROM_SHA1=\"" + sources.rom_sha1 + "\"");
+    // Source paths end up in assert messages: keep the (temporary) build directories out of the module.
+    args.push_back("-ffile-prefix-map=" + path_utf8(sources.generated_dir) + "=generated");
+    args.push_back("-ffile-prefix-map=" + path_utf8(sources.module_dir) + "=module");
     args.push_back("-I" + path_utf8(sources.module_dir));
     args.push_back("-I" + path_utf8(sources.module_dir / "include"));
     args.push_back("-I" + path_utf8(sources.generated_dir));
@@ -66,8 +69,9 @@ std::vector<std::string> link_args(const Toolchain& toolchain, const Platform& t
     if (target.os != "macos") args.push_back("-s");  // symbols are not needed; the module is large otherwise
     if (target.os == "windows") args.push_back("-static-libgcc");
     if (target.os == "android")  // 16 KiB pages (the app's own libraries use the same alignment), no executable stack
+        // --no-undefined: a symbol missing from the NDK sysroot is a build error, not a dlopen failure on the phone.
         args.insert(args.end(), {"-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384", "-Wl,-z,noexecstack",
-                                 "-Wl,-z,relro", "-Wl,-z,now"});
+                                 "-Wl,-z,relro", "-Wl,-z,now", "-Wl,--no-undefined"});
     for (const auto& object : objects) args.push_back(path_utf8(object));
     args.insert(args.end(), {"-o", path_utf8(output)});
     return args;
@@ -140,6 +144,12 @@ std::filesystem::path ndk_clang(const std::filesystem::path& ndk, const Platform
     const auto clang = ndk / "toolchains" / "llvm" / "prebuilt" / ndk_prebuilt_tag(host) / "bin" / ("clang" + host.exe_suffix);
     std::error_code error;
     return std::filesystem::is_regular_file(clang, error) ? clang : std::filesystem::path();
+}
+
+std::optional<std::filesystem::path> find_ndk(const Platform& host, const std::function<std::string(const char*)>& env) {
+    for (const auto& candidate : ndk_candidates(host, env))
+        if (!ndk_clang(candidate, host).empty()) return candidate;
+    return std::nullopt;
 }
 
 Toolchain ndk_toolchain(const std::filesystem::path& clang) {
