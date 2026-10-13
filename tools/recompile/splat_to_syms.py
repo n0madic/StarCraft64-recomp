@@ -13,6 +13,8 @@ import json
 import re
 from pathlib import Path
 
+HEADER = "# SC64 NTSC-U symbol table: names, addresses and sizes only; no game bytes (ADR-084)."
+
 
 def read_functions(path: Path, section: dict, identities: dict[int, str]) -> list[dict]:
     functions = []
@@ -37,7 +39,7 @@ def read_functions(path: Path, section: dict, identities: dict[int, str]) -> lis
 
 def render_sections(sections: list[dict]) -> str:
     seen_names = set()
-    lines = ["# Private ROM-derived metadata. Do not publish this file."]
+    lines = [HEADER]
     for section in sections:
         lines += ["", "[[section]]", f"name = {json.dumps(section['name'])}",
                   f"rom = 0x{section['rom']:X}", f"vram = 0x{section['vram']:08X}",

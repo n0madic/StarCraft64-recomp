@@ -27,6 +27,23 @@ generated game is replaced transactionally and its previous output stays in the
 scratch directory. The result was verified byte-identical to the previous
 generation on the NTSC-U ROM. The manual steps follow.
 
+## Recipe (ADR-084)
+
+The analysis result that depends only on the NTSC-U ROM is committed as `recipe/ntsc-u/`
+(names, addresses, sizes, hook text and hashes; no game bytes). It lets N64Recomp run without
+Python, spimdisasm or the inventory:
+
+```sh
+make recipe-verify ROM="/path/to/your.z64"   # recipe.py check + generate, compared with generated.json
+make recipe-export ANALYSIS=local/recompile/symbols-<stamp>   # maintainers, after `make recompile`
+python tools/recompile/recipe.py generate ROM --output local/generated/game --replace
+```
+
+`check` accepts only whitelisted line forms (no instruction words or byte data) and `generate`
+rejects a generated file whose SHA-256 differs from `generated.json`. Export needs the analysis
+directory and the generated game of the same `make recompile` run; run it again whenever the
+analysis, hooks or pinned N64Recomp change, then commit the diff.
+
 ```sh
 git -C third_party/N64Recomp submodule update --init --recursive
 python3 tools/recompile/patch_recompiler.py third_party/N64Recomp

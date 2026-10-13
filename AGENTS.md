@@ -27,6 +27,10 @@ User-facing discussion is normally Russian. All project documentation is English
 - Never track or upload ROMs, extracted assets, assembly/microcode dumps,
   generated game/RSP C, game archives, captures, saves, signing keys or personal
   bundles/APKs. Keep them under ignored `local/`; preserve existing private data.
+- `recipe/ntsc-u/` is the one tracked ROM-derived exception (ADR-084): symbol names,
+  addresses, sizes, hook text and SHA-256 hashes, no game bytes or generated code.
+  `make recipe-export` refreshes it and `tools/recompile/recipe.py check` rejects
+  anything outside its whitelist; never add other analysis output to it.
 - Only reviewed authored source, documentation, metadata and synthetic fixtures
   belong in Git. Ignore rules do not protect already tracked or force-added files.
   Inspect the diff and stage explicit paths; do not use `git add -A` or `git add -f`

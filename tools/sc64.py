@@ -217,6 +217,18 @@ def inventory_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     return [[str(recompile_python(host, args)), str(TOOLS / 'research_libultra/ensure_inventory.py'), str(rom), *dump]]
 
 
+def recipe_commands(host: Host, args: argparse.Namespace) -> list[Command]:
+    """`recipe-verify`: N64Recomp + the committed recipe, compared with its hashes (stdlib Python)."""
+    return [script('recompile/recipe.py', 'check'), script('recompile/recipe.py', 'generate', require_rom(args.rom, 'recipe-verify'))]
+
+
+def recipe_export_commands(host: Host, args: argparse.Namespace) -> list[Command]:
+    if not args.analysis:
+        raise UsageError('recipe-export needs the analysis directory of a `make recompile` run: '
+                         '--analysis local/recompile/symbols-<timestamp> (or ANALYSIS=...)')
+    return [script('recompile/recipe.py', 'export', '--analysis', args.analysis), script('recompile/recipe.py', 'check')]
+
+
 def venv_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     python = hostenv.venv_python(ROOT, host)
     create = [] if python.is_file() else [[sys.executable, '-m', 'venv', str(ROOT / '.venv')]]
@@ -309,6 +321,8 @@ def parser() -> argparse.ArgumentParser:
     options.add_argument('--recomp-python', type=Path,
                          default=Path(os.environ['RECOMP_PYTHON']) if os.environ.get('RECOMP_PYTHON') else None,
                          help='Python with spimdisasm for `recompile` (default: the project .venv, $RECOMP_PYTHON)')
+    options.add_argument('--analysis', type=Path, default=Path(os.environ['ANALYSIS']) if os.environ.get('ANALYSIS') else None,
+                         help='recipe-export: analysis directory of a `recompile` run (default: $ANALYSIS)')
     options.add_argument('--baseline-replay', type=Path,
                          default=Path(os.environ['BASELINE_REPLAY']) if os.environ.get('BASELINE_REPLAY') else None,
                          help='benchmark-renderer: preserved baseline replay executable (default: $BASELINE_REPLAY)')
@@ -341,6 +355,9 @@ def parser() -> argparse.ArgumentParser:
     add('inventory', 'generate local/reports/libultra-resident/inventory.json (also run by recompile when missing)',
         inventory_commands)
     add('recompile', 'ROM -> local/generated/game (N64Recomp, analysis, observers, validation)', recompile_commands)
+    add('recipe-verify', 'check recipe/ntsc-u and regenerate the game C from it; compare with its hashes (ADR-084)',
+        recipe_commands)
+    add('recipe-export', 'refresh recipe/ntsc-u from a recompile analysis (maintainers)', recipe_export_commands)
     add('benchmark-renderer', 'compare private renderer timings and exact output against a baseline',
         benchmark_commands)
     add('bootstrap', 'fetch pinned public dependencies into local/toolchains',

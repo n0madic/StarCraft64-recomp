@@ -236,6 +236,27 @@ class RecompileCommandTests(unittest.TestCase):
         self.assertEqual(driver.VENV_PACKAGES, ('spimdisasm==1.42.4', 'rabbitizer==1.16.2', 'pyelftools==0.33'))
 
 
+class RecipeCommandTests(unittest.TestCase):
+    def test_verify_checks_the_recipe_then_regenerates_with_plain_python(self):
+        with clean_env():
+            check, generate = commands(LINUX, 'recipe-verify', '--rom', '/g.z64')
+        self.assertEqual([Path(check[1]).name, check[2]], ['recipe.py', 'check'])
+        self.assertEqual([Path(generate[1]).name, *generate[2:]], ['recipe.py', 'generate', '/g.z64'])
+        self.assertEqual(check[0], sys.executable)
+
+    def test_verify_requires_a_rom(self):
+        with clean_env(), self.assertRaisesRegex(SystemExit, 'requires --rom'):
+            commands(LINUX, 'recipe-verify')
+
+    def test_export_needs_an_analysis_directory(self):
+        with clean_env(), self.assertRaisesRegex(SystemExit, '--analysis'):
+            commands(MAC, 'recipe-export')
+        with clean_env():
+            export, check = commands(MAC, 'recipe-export', '--analysis', 'local/recompile/symbols-1')
+        self.assertEqual(export[2:], ['export', '--analysis', 'local/recompile/symbols-1'])
+        self.assertEqual(check[2], 'check')
+
+
 class InventoryCommandTests(unittest.TestCase):
     def test_inventory_runs_the_generator_with_the_venv_python(self):
         with clean_env(), tempfile.TemporaryDirectory() as directory, mock.patch.object(driver, 'ROOT', Path(directory)):

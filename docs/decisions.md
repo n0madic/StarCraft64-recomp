@@ -2038,3 +2038,33 @@ capture and inventory were identical across two runs; a full `recompile` with th
 inventory produced a byte-identical `local/generated/game` (86 files). The chain needs the
 research emulator, which has only been built on macOS (D-057), so Linux and Windows hosts
 need a prepared inventory or a macOS-built one. Menu and game sections remain manual.
+
+## ADR-084 — The NTSC-U recompilation recipe is committed metadata (ACCEPTED)
+
+**Context:** Everything the analysis derives before N64Recomp runs depends only on the one
+supported ROM (SHA-1 checked): function names, addresses and sizes, section intervals, the
+eleven CACHE-nop sites and the authored hook text. Regenerating it needs Python, spimdisasm,
+the libultra inventory (n64sym, Docker and a research-emulator RDRAM capture), which is too much
+for a one-time task on a user's machine and blocks a launcher that takes only the ROM. The
+previous header and AGENTS.md called this metadata private.
+
+**Decision:** `recipe/ntsc-u/` is tracked: `sc64.syms.toml` (names, `vram`, sizes, section
+`rom`/`vram`/`size`), `sc64.toml` (config template with `@ROM@`/`@OUTPUT@`, instruction patches
+with `value = 0`, hooks calling host callbacks) and `generated.json` (SHA-256 of the 86 generated
+C files and of the two inputs). It holds no game bytes and no generated code; `recipe.py check`
+(also a unit test over the committed files) accepts only whitelisted line forms, so an instruction
+word, a byte blob or a stray comment fails. `recipe.py generate` runs the patched N64Recomp with the
+recipe and rejects any generated file whose hash differs; `recipe.py export` refreshes the recipe
+only from a `make recompile` analysis whose recorded generation and generated directory match.
+`make recipe-verify ROM=...` and `make recipe-export ANALYSIS=...` wrap them. The full analysis
+(`make recompile`, inventory, spimdisasm) stays the maintainers' generator and the evidence
+trail; the audit files (`instruction-patches.json` with original words, `poll-hooks.json`) stay
+private. AGENTS.md now names this directory as the one tracked ROM-derived exception.
+
+**Consequences:** Verified on macOS arm64: N64Recomp with only the recipe produced all 86 files
+identical to the existing `local/generated/game` in 0.3 s, and a corrupted hash is rejected. The
+user-side path no longer needs Python, spimdisasm, the inventory, Docker or the emulator, only the
+ROM, the patched N64Recomp and a C compiler. The hashes assume the pinned N64Recomp plus
+`patch_recompiler.py`; other builds of it (Linux/Windows, other compilers) must be shown to emit the
+same bytes (D-058). The launcher stages remain: prebuilt N64Recomp, game module separate from the
+shell, `sc64_setup`, packaging, Android.
