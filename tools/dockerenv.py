@@ -29,6 +29,14 @@ def container_path(path: Path, host: Host) -> str:
     return str(CONTAINER_ROOT / path.resolve().relative_to(ROOT).as_posix())
 
 
+def base_image(dockerfile: Path) -> str:
+    """The pinned base image named by the first FROM line of ``dockerfile``."""
+    for line in dockerfile.read_text().splitlines():
+        if line.startswith('FROM '):
+            return line.split()[1]
+    raise ValueError(f'No FROM line in {dockerfile}')
+
+
 def ensure_image(repository: str, dockerfile: Path, host: Host | None = None, platform: str | None = None) -> str:
     """Build (or reuse) a local image of ``dockerfile``, tagged by the file's hash.
 

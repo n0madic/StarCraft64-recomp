@@ -2068,3 +2068,31 @@ ROM, the patched N64Recomp and a C compiler. The hashes assume the pinned N64Rec
 `patch_recompiler.py`; other builds of it (Linux/Windows, other compilers) must be shown to emit the
 same bytes (D-058). The launcher stages remain: prebuilt N64Recomp, game module separate from the
 shell, `sc64_setup`, packaging, Android.
+
+## ADR-085 — Release N64Recomp binaries are built per target and checked against the recipe (ACCEPTED)
+
+**Context:** The launcher (ADR-084) runs a prebuilt, patched N64Recomp, so the binary must exist for
+macOS arm64, Linux x86_64 and Windows x86_64, and each build must produce the bytes the recipe hashes
+describe. `make recompile` built it only for the host with whatever compiler was found. The pinned
+N64Recomp opens the generated C with text-mode `std::ofstream`, which writes CRLF on Windows and would
+fail every hash there.
+
+**Decision:** `tools/recompile/build_recompiler.py` (`make build-recompiler`, `make verify-recompiler`)
+builds only the `N64RecompCLI` target in Release with the Stage 1 patches and publishes
+`local/dist/recompiler/<target>/` with a `receipt.json` (source commit, hash of the patch tool and of the
+three patched files, submodule commits, compiler, binary SHA-256, build mode). It reuses the existing
+cross-build plans: host compiler on Linux x86_64, the pinned local Docker image elsewhere, mingw-w64 for
+Windows (cross or MSYS2). Linux is linked fully static (independent of the user's glibc), Windows static
+with only system DLLs, macOS with deployment target 13.0. `patch_recompiler.py` additionally opens the four
+generated-output files in binary mode. `make recompile` builds the same way for its own host (a generic
+host tree remains for hosts without a release target). `verify` runs the published binary on the recipe
+with `recipe.generate` and records the result in the receipt; foreign binaries run in a local amd64
+container (the Linux one in the pinned Debian, the Windows one under Wine from
+`tools/recompile/wine.Dockerfile`, prefix in ignored `local/recompile/`).
+
+**Consequences:** On macOS arm64 all three binaries were built from the pinned source and each generated
+the 86 files with the recorded hashes: macOS natively, Linux in amd64 Docker, Windows under Wine. The
+binary-mode patch left the macOS hashes unchanged. The Linux and Windows checks run under emulation, not
+on real machines or with their native toolchains (D-058). The binaries themselves are not bit-reproducible
+and need not be; the contract is the hash of the generated C. Packaging them into a release and the
+launcher stages remain.

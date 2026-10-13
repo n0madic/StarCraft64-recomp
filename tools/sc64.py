@@ -43,6 +43,7 @@ NATIVE_TEST_TARGETS = (
 VENV_PACKAGES = ('spimdisasm==1.42.4', 'rabbitizer==1.16.2', 'pyelftools==0.33')
 RENDERER_BUILD = ROOT / 'local/build/renderer'
 INVENTORY = ROOT / 'local/reports/libultra-resident/inventory.json'
+RECOMPILER_TARGETS = ('macos-arm64', 'linux-x86_64', 'windows-x86_64')  # tools/recompile/build_recompiler.py
 EMULATOR = ROOT / 'local/toolchains/ares-build/test-runner/ares-test'
 RENDER_DRIVERS = ('vulkan', 'opengles2')  # tools/android/build.py RENDER_DRIVERS
 EMULATOR_DRIVER_LINE = re.compile(rb'^sc64\.render_driver = opengles2$', re.MULTILINE)
@@ -222,6 +223,16 @@ def recipe_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     return [script('recompile/recipe.py', 'check'), script('recompile/recipe.py', 'generate', require_rom(args.rom, 'recipe-verify'))]
 
 
+def build_recompiler_commands(host: Host, args: argparse.Namespace) -> list[Command]:
+    target = ['--target', args.target] if args.target else []
+    return [script('recompile/build_recompiler.py', 'build', *target, '--jobs', str(args.jobs), *(['--docker'] if args.docker else []))]
+
+
+def verify_recompiler_commands(host: Host, args: argparse.Namespace) -> list[Command]:
+    target = ['--target', args.target] if args.target else []
+    return [script('recompile/build_recompiler.py', 'verify', require_rom(args.rom, 'verify-recompiler'), *target)]
+
+
 def recipe_export_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     if not args.analysis:
         raise UsageError('recipe-export needs the analysis directory of a `make recompile` run: '
@@ -321,6 +332,8 @@ def parser() -> argparse.ArgumentParser:
     options.add_argument('--recomp-python', type=Path,
                          default=Path(os.environ['RECOMP_PYTHON']) if os.environ.get('RECOMP_PYTHON') else None,
                          help='Python with spimdisasm for `recompile` (default: the project .venv, $RECOMP_PYTHON)')
+    options.add_argument('--target', choices=RECOMPILER_TARGETS, default=os.environ.get('RECOMPILER_TARGET') or None,
+                         help='build-recompiler/verify-recompiler: release target (default: this host; $RECOMPILER_TARGET)')
     options.add_argument('--analysis', type=Path, default=Path(os.environ['ANALYSIS']) if os.environ.get('ANALYSIS') else None,
                          help='recipe-export: analysis directory of a `recompile` run (default: $ANALYSIS)')
     options.add_argument('--baseline-replay', type=Path,
@@ -357,6 +370,9 @@ def parser() -> argparse.ArgumentParser:
     add('recompile', 'ROM -> local/generated/game (N64Recomp, analysis, observers, validation)', recompile_commands)
     add('recipe-verify', 'check recipe/ntsc-u and regenerate the game C from it; compare with its hashes (ADR-084)',
         recipe_commands)
+    add('build-recompiler', 'build the patched N64Recomp release binary into local/dist/recompiler (ADR-085)',
+        build_recompiler_commands)
+    add('verify-recompiler', 'run that binary on the recipe and compare every generated hash', verify_recompiler_commands)
     add('recipe-export', 'refresh recipe/ntsc-u from a recompile analysis (maintainers)', recipe_export_commands)
     add('benchmark-renderer', 'compare private renderer timings and exact output against a baseline',
         benchmark_commands)

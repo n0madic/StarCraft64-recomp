@@ -83,10 +83,10 @@ def elf_arch(path: Path) -> tuple[str, str]:
 
 def base_image() -> str:
     """The pinned base image named by the first FROM line of the n64sym Dockerfile."""
-    for line in N64SYM_DOCKERFILE.read_text().splitlines():
-        if line.startswith('FROM '):
-            return line.split()[1]
-    raise PipelineError(f'No FROM line in {N64SYM_DOCKERFILE}')
+    try:
+        return dockerenv.base_image(N64SYM_DOCKERFILE)
+    except ValueError as error:
+        raise PipelineError(str(error)) from error
 
 
 def build_n64sym(host: hostenv.Host) -> None:

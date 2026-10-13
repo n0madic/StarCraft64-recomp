@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -188,9 +189,12 @@ def compare(expected: dict[str, str], actual: dict[str, str]) -> list[str]:
 
 
 def generate(rom: Path, recompiler: Path, output: Path | None = None, *, replace: bool = False,
-             recipe: Path = RECIPE, scratch: Path = SCRATCH) -> dict:
+             recipe: Path = RECIPE, scratch: Path = SCRATCH,
+             launch: Callable[[Path, Path], list[str]] | None = None) -> dict:
     """Run N64Recomp with the recipe and require the recorded hashes.
 
+    ``launch(recompiler, config)`` returns the command line when the binary must run in a
+    container or emulator; every path in it must resolve identically there.
     With ``output`` the verified result replaces it transactionally; without,
     only the comparison is made and the scratch directory is removed on success.
     """
@@ -209,7 +213,8 @@ def generate(rom: Path, recompiler: Path, output: Path | None = None, *, replace
     config = work / CONFIG
     config.write_text(render_config((recipe / CONFIG).read_text(), rom.resolve(), produced))
     with (work / "recompiler.log").open("w") as log_file:
-        result = subprocess.run([str(recompiler.resolve()), str(config)], stdout=log_file, stderr=subprocess.STDOUT)
+        command = launch(recompiler.resolve(), config) if launch else [str(recompiler.resolve()), str(config)]
+        result = subprocess.run(command, stdout=log_file, stderr=subprocess.STDOUT)
     log = (work / "recompiler.log").read_text()
     if result.returncode:
         raise RecipeError(f"Recompiler exited {result.returncode}; diagnostics: {work / 'recompiler.log'}")
@@ -236,10 +241,12 @@ def generate(rom: Path, recompiler: Path, output: Path | None = None, *, replace
 
 
 def recompiler_binary() -> Path:
-    import recompile_all
-    if not recompile_all.recompiler_binary().is_file():
-        recompile_all.build_recompiler(8)
-    return recompile_all.recompiler_binary()
+    import build_recompiler
+    import hostenv
+    host = hostenv.current()
+    if not build_recompiler.host_binary(host).is_file():
+        build_recompiler.build_host(host)
+    return build_recompiler.host_binary(host)
 
 
 def main() -> None:

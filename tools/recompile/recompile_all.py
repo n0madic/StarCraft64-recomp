@@ -25,6 +25,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import build_recompiler
 import hostenv
 from private_paths import require_local_or
 from rom_info import NTSC_U_SHA1 as ROM_SHA1
@@ -32,8 +34,6 @@ from rom_info import NTSC_U_SHA1 as ROM_SHA1
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS = Path(__file__).resolve().parent
 DEFAULT_INVENTORY = ROOT / "local/reports/libultra-resident/inventory.json"
-RECOMPILER_SOURCE = ROOT / "third_party/N64Recomp"
-RECOMPILER_BUILD = ROOT / "local/build/recompiler"
 DEFAULT_OUTPUT = ROOT / "local/generated/game"
 ENSURE_INVENTORY = ROOT / "tools/research_libultra/ensure_inventory.py"
 
@@ -80,24 +80,15 @@ def run(step: str, command: list[str | Path]) -> None:
 
 
 def recompiler_binary() -> Path:
-    return RECOMPILER_BUILD / ("N64Recomp" + hostenv.current().exe_suffix)
+    return build_recompiler.host_binary(hostenv.current())
 
 
-def build_recompiler(jobs: int) -> None:
-    if not (RECOMPILER_SOURCE / "CMakeLists.txt").is_file():
-        raise PipelineError(f"{RECOMPILER_SOURCE} is missing; run: "
-                            "git -C third_party/N64Recomp submodule update --init --recursive")
-    run("patch N64Recomp (idempotent)", [sys.executable, TOOLS / "patch_recompiler.py", RECOMPILER_SOURCE])
-    if not (RECOMPILER_BUILD / "CMakeCache.txt").is_file():
-        flags = ["-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_CXX_FLAGS=-include cstdlib"]
-        # Pinned Rabbitizer omits malloc/free declarations; the forced include avoids editing it.
-        if llvm := hostenv.llvm_bin():
-            flags += [f"-DCMAKE_C_COMPILER={llvm / 'clang'}", f"-DCMAKE_CXX_COMPILER={llvm / 'clang++'}"]
-        run("configure N64Recomp", ["cmake", "-S", RECOMPILER_SOURCE, "-B", RECOMPILER_BUILD, "-G", "Ninja", *flags])
-    run("build N64Recomp", ["cmake", "--build", RECOMPILER_BUILD, "--target", "N64RecompCLI", "-j", str(jobs)])
-    binary = recompiler_binary()
-    if not binary.is_file():
-        raise PipelineError(f"Recompiler build did not produce {binary}")
+def build_host_recompiler(jobs: int) -> None:
+    """Patch and build N64Recomp for this machine (shared with the release builds, ADR-085)."""
+    try:
+        build_recompiler.build_host(hostenv.current(), jobs)
+    except build_recompiler.RecompilerError as error:
+        raise PipelineError(str(error)) from error
 
 
 def main() -> None:
@@ -118,7 +109,7 @@ def main() -> None:
         run("generate libultra inventory", [sys.executable, ENSURE_INVENTORY, rom])
     check_inputs(rom, inventory)
 
-    build_recompiler(args.jobs)
+    build_host_recompiler(args.jobs)
 
     analysis = ROOT / "local/recompile" / time.strftime("symbols-%Y%m%d-%H%M%S")
     run("analyze ROM", [sys.executable, TOOLS / "prepare.py", rom,

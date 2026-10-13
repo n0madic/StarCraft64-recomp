@@ -60,6 +60,20 @@ TABLE_REPLACEMENT = """        // SC64: overlay code refers to switch tables in 
 """
 
 
+# Generated C is compared by SHA-256 (ADR-084), so every host must write the same bytes:
+# a text-mode ofstream would turn each LF into CRLF on Windows.
+BINARY_OUTPUTS = (
+    ('std::ofstream func_header_file{ config.output_func_path / "funcs.h" };',
+     'std::ofstream func_header_file{ config.output_func_path / "funcs.h", std::ios::binary };'),
+    ('current_output_file = std::ofstream{config.output_func_path / fmt::format("funcs_{}.c", output_file_count)};',
+     'current_output_file = std::ofstream{config.output_func_path / fmt::format("funcs_{}.c", output_file_count), std::ios::binary};'),
+    ('std::ofstream lookup_file{ config.output_func_path / "lookup.cpp" };',
+     'std::ofstream lookup_file{ config.output_func_path / "lookup.cpp", std::ios::binary };'),
+    ('std::ofstream overlay_file(config.output_func_path / "recomp_overlays.inl");',
+     'std::ofstream overlay_file(config.output_func_path / "recomp_overlays.inl", std::ios::binary);'),
+)
+
+
 def apply_source_change(source: Path, relative: str, anchor: str, replacement: str,
                         previous_replacements: tuple[str, ...] = ()) -> None:
     path = source / relative
@@ -69,6 +83,20 @@ def apply_source_change(source: Path, relative: str, anchor: str, replacement: s
     patched = original.replace(anchor, replacement)
     previous = tuple(original.replace(anchor, old) for old in previous_replacements)
     if path.read_text() not in (original, patched, *previous):
+        raise SystemExit(f"Refusing to overwrite unrelated recompiler source changes: {relative}")
+    path.write_text(patched)
+
+
+def apply_source_changes(source: Path, relative: str, changes: tuple[tuple[str, str], ...]) -> None:
+    """Several independent anchor replacements in one file, all checked before writing."""
+    path = source / relative
+    original = subprocess.check_output(["git", "-C", str(source), "show", f"HEAD:{relative}"], text=True)
+    patched = original
+    for anchor, replacement in changes:
+        if original.count(anchor) != 1:
+            raise SystemExit(f"Recompiler source anchor changed: {relative}")
+        patched = patched.replace(anchor, replacement)
+    if path.read_text() not in (original, patched):
         raise SystemExit(f"Refusing to overwrite unrelated recompiler source changes: {relative}")
     path.write_text(patched)
 
@@ -84,6 +112,7 @@ def main() -> None:
         f'    "{name}",\n' for name in FUNCTIONS[:-1])
     apply_source_change(args.source, "src/symbol_lists.cpp", ANCHOR, ANCHOR + BLOCK, (ANCHOR + legacy_block,))
     apply_source_change(args.source, "src/analysis.cpp", TABLE_ANCHOR, TABLE_REPLACEMENT)
+    apply_source_changes(args.source, "src/main.cpp", BINARY_OUTPUTS)
 
 
 if __name__ == "__main__":

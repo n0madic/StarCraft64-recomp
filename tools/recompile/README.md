@@ -39,6 +39,13 @@ make recipe-export ANALYSIS=local/recompile/symbols-<stamp>   # maintainers, aft
 python tools/recompile/recipe.py generate ROM --output local/generated/game --replace
 ```
 
+The recompiler itself is built by `make build-recompiler` (`build_recompiler.py`, ADR-085) for
+`macos-arm64`, `linux-x86_64` or `windows-x86_64` (`RECOMPILER_TARGET=...`; default: this host) into
+`local/dist/recompiler/<target>/` with a `receipt.json` (source commit, patch hash, compiler,
+binary SHA-256). `make verify-recompiler ROM=...` runs that binary on the recipe and records the
+result in the receipt. The Linux binary is fully static and runs in a pinned Debian container
+when the host is not Linux x86_64; the macOS one targets macOS 13 and links only system libraries.
+
 `check` accepts only whitelisted line forms (no instruction words or byte data) and `generate`
 rejects a generated file whose SHA-256 differs from `generated.json`. Export needs the analysis
 directory and the generated game of the same `make recompile` run; run it again whenever the
