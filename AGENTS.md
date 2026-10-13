@@ -55,6 +55,8 @@ User-facing discussion is normally Russian. All project documentation is English
 - `native/shell/`: SDL3 application (`app.cpp`), session, lifecycle, audio, mailbox,
   ROM import, presentation selection (`native.cpp`), video/overlay, host scripts.
 - `native/shell/input/`: SDL-free gesture/menu/HUD/minimap/touch-pad adapters.
+- `native/setup/`: `sc64_setup` and its library, ROM to game module with the prebuilt N64Recomp and a
+  probed compiler or pinned zig (ADR-087); the shell builds the module on first run through it.
 - `native/module/`: the game-module ABI (`sc64_module.h`, `sc64_imports.def`), `module_main.c`
   and the shim `librecomp/sections.h`; the generated C is built into `sc64-game.*` (ADR-086).
 - `native/android/`: NDK profile, manifest, `Sc64Activity` and haptics JNI helper.

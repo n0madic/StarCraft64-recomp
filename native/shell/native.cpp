@@ -434,6 +434,10 @@ std::optional<std::string> Native::choose_rom() {
 }
 
 std::optional<std::string> Native::poll_rom() {
+    if (auto build = session().poll_build()) {
+        if (build->empty()) reset_feedback();
+        return build;
+    }
     auto result = sc64_poll_rom();
     if (result.path.empty()) {
         if (result.error.empty()) return std::nullopt;

@@ -4,6 +4,9 @@
 #include "pause_policy.hpp"
 #include "../runtime/ui_feedback.hpp"
 #include "../runtime/guest_errors.hpp"
+#if defined(SC64_HAS_SETUP)
+#include "game_build.hpp"
+#endif
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -12,6 +15,7 @@
 #include <memory>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -96,6 +100,9 @@ public:
     void stop();
     void fail(const std::string& message);
     std::string error();
+    // While the game module is being built from the ROM (ADR-087): the progress or error text, "" once
+    // the game has been started, nothing when no build was requested. Call from the main thread.
+    std::optional<std::string> poll_build();
     FrameMailbox mailbox;
     ScanoutMailbox scanout;
     CpuScanouts cpu_scanouts;
@@ -122,6 +129,11 @@ private:
     void launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::path& storage, bool persist);
     void start_runtime(std::vector<std::uint8_t> rom, const std::filesystem::path& storage);
     bool launched_ = false;
+#if defined(SC64_HAS_SETUP)
+    struct PendingLaunch { std::vector<std::uint8_t> rom; std::filesystem::path storage; bool persist; };
+    GameBuild build_;
+    std::optional<PendingLaunch> pending_;
+#endif
 };
 Session& session();
 }

@@ -2130,3 +2130,34 @@ A trampoline costs 0.77 ns against 0.78 ns for a table call; the intro crosses t
 25.9-26.0 s in 25 s). Mission gameplay was not measured (D-059). The module is game-derived code
 and stays private like the old executable. The user-side build of the module, the setup tool
 and release packaging are later stages.
+
+## ADR-087 — `sc64_setup` builds the game module from the user's ROM (ACCEPTED)
+
+**Context:** With the recipe (ADR-084), prebuilt N64Recomp (ADR-085) and the module ABI (ADR-086),
+turning a ROM into a playable game needs only the ROM check, one N64Recomp run, a hash check and a
+C compile. Users should not install Python, cmake, Docker or an SDK for that one-time step.
+
+**Decision:** `native/setup/` (`sc64_setup_lib` and the `sc64_setup` executable, C++20, no Python) does
+it in five steps: check the ROM (any byte order, SHA-1 of the NTSC-U dump), pick a compiler, run the
+recompiler on the rendered recipe config and accept the output only with the recorded SHA-256 hashes,
+compile `module_main.c` and the generated C in parallel and link the module, install it with a receipt
+under `<storage>/game/` (atomically; the generated C and objects are deleted, the logs stay). A system
+compiler (`$CC`, then `cc`, `clang`, `gcc`) is used only if a probe build with the module's flags and
+a link succeeds; otherwise zig 0.16.0 is downloaded once into `<storage>/tools` with the system `curl`,
+verified against the pinned SHA-256 and unpacked with the system `tar`, and used with its caches kept
+there. `--use-zig` forces it. An up-to-date receipt (ROM, recipe, ABI, recompiler and module hashes)
+makes the run a no-op. The shell links the same library: when no module exists and
+`setup-resources/` and `N64Recomp` sit beside it, `Session` builds on a worker thread and the progress
+becomes the start message; the game starts when the module exists. `make setup-game` runs the tool from
+the build tree. Process creation, environment overrides, batching and the whole flow are tested with
+a fake runner; `std::filesystem::copy_file` is avoided because it fails with EACCES on emulated
+file systems.
+
+**Consequences:** Verified: macOS arm64 with Apple clang (3 s, ROM to module) and with the downloaded
+zig (24 s including the download); a clean Debian amd64 container without a compiler (the CLI and the
+shell alone: zig download, build, then playing); modules from all three builds give byte-identical frames
+(31, fields 300-330, intro), also between macOS arm64 and Linux amd64. Windows: unit tests, the real
+`CreateProcessW` path and a zig-built DLL under Wine; zig.exe itself cannot run under this Wine/Rosetta
+and Windows download/unpack and system compilers are untested (D-060). Release packaging, signing and
+the Android flow remain. The module in `<storage>/game` is trusted as found (its hash is in the receipt
+but not checked at load).

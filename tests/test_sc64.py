@@ -112,15 +112,15 @@ class RunAndTestTests(unittest.TestCase):
         cmake = (ROOT / 'CMakeLists.txt').read_text()
         shell = (ROOT / 'cmake/shell.cmake').read_text()
         for target in driver.NATIVE_TEST_TARGETS:
-            if target == 'sc64_game_module_test':
-                self.assertIn(f'add_executable({target} ', shell)
+            if target in ('sc64_game_module_test', 'sc64_setup_test'):
+                self.assertIn(f'add_executable({target} ', shell + (ROOT / 'cmake/setup.cmake').read_text())
             elif target not in ('sc64_host_telemetry_test', 'sc64_loop_watch_test'):
                 self.assertIn(target[len('sc64_'):-len('_test')], cmake, target)
 
 
 def clean_env(**extra):
     """Environment without any variable the driver reads, so tests do not depend on the caller's shell."""
-    names = ('ROM', 'BUNDLE_ROM', 'RECOMP_PYTHON', 'BASELINE_REPLAY', 'RENDERER_MANIFEST', 'JOBS', 'BUILD_TYPE', 'STORAGE', 'REPORT', 'RUN_SECONDS', 'SERIAL', 'ADB', 'ANDROID_SDK',
+    names = ('DATA_DIR', 'FORCE', 'USE_ZIG', 'ROM', 'BUNDLE_ROM', 'RECOMP_PYTHON', 'BASELINE_REPLAY', 'RENDERER_MANIFEST', 'JOBS', 'BUILD_TYPE', 'STORAGE', 'REPORT', 'RUN_SECONDS', 'SERIAL', 'ADB', 'ANDROID_SDK',
              'APK', 'PAGE_SIZE', 'ANDROID_BACKEND', 'ANDROID_DEBUGGABLE', 'ANDROID_RENDER_DRIVER', 'SMOKE_SECONDS')
     env = {k: v for k, v in os.environ.items() if k not in names}
     env.update(extra)
@@ -258,6 +258,32 @@ class RecipeCommandTests(unittest.TestCase):
             export, check = commands(MAC, 'recipe-export', '--analysis', 'local/recompile/symbols-1')
         self.assertEqual(export[2:], ['export', '--analysis', 'local/recompile/symbols-1'])
         self.assertEqual(check[2], 'check')
+
+
+class SetupGameTests(unittest.TestCase):
+    def test_builds_the_tool_then_runs_it_with_the_host_recompiler(self):
+        with tempfile.TemporaryDirectory() as directory, clean_env(), mock.patch.object(driver, 'ROOT', Path(directory)):
+            recompiler = Path(directory) / 'local/dist/recompiler/linux-x86_64/N64Recomp'
+            recompiler.parent.mkdir(parents=True)
+            recompiler.write_text('')
+            lines = commands(LINUX, 'setup-game', '--rom', '/g.z64', '--data-dir', '/d', '--use-zig')
+        self.assertEqual([Path(name).name for name in names(lines)], ['build.py', 'cmake', 'sc64_setup'])
+        self.assertIn('sc64_setup', lines[1])
+        run = lines[2]
+        self.assertEqual(run[run.index('--rom') + 1], '/g.z64')
+        self.assertEqual(run[run.index('--data') + 1], '/d')
+        self.assertEqual(Path(run[run.index('--recompiler') + 1]), recompiler)
+        self.assertIn('--use-zig', run)
+        self.assertNotIn('--force', run)
+
+    def test_a_missing_recompiler_names_the_command_that_builds_it(self):
+        with tempfile.TemporaryDirectory() as directory, clean_env(), mock.patch.object(driver, 'ROOT', Path(directory)):
+            with self.assertRaisesRegex(SystemExit, 'build-recompiler'):
+                commands(MAC, 'setup-game', '--rom', '/g.z64')
+
+    def test_requires_a_rom(self):
+        with clean_env(), self.assertRaisesRegex(SystemExit, 'requires --rom'):
+            commands(MAC, 'setup-game')
 
 
 class InventoryCommandTests(unittest.TestCase):

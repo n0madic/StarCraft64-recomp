@@ -35,7 +35,7 @@ NATIVE_TEST_TARGETS = (
     'sc64_guest_fpu_test', 'sc64_gfx_test', 'sc64_rom_import_test', 'sc64_sha_test',
     'sc64_desktop_input_test', 'sc64_touch_input_test', 'sc64_gestures_test', 'sc64_map_taps_test',
     'sc64_hud_input_test', 'sc64_hud_buttons_test', 'sc64_menu_input_test', 'sc64_haptics_test',
-    'sc64_host_telemetry_test', 'sc64_loop_watch_test', 'sc64_game_module_test')
+    'sc64_host_telemetry_test', 'sc64_loop_watch_test', 'sc64_game_module_test', 'sc64_setup_test')
 
 # Pins of the recompilation environment (the splat research workflow has its own, see
 # docs/research-workflow.md): `recompile_all.py` needs spimdisasm and its disassembler;
@@ -120,6 +120,22 @@ def test_native_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     return [script('desktop/build.py', '--build-type', args.build_type, '--configure-only'),
             ['cmake', '--build', str(build), '--target', *NATIVE_TEST_TARGETS, '-j', str(args.jobs)],
             ['ctest', '--test-dir', str(build), '--output-on-failure']]
+
+
+def setup_game_commands(host: Host, args: argparse.Namespace) -> list[Command]:
+    """Run sc64_setup (ROM -> game module, ADR-087) from the desktop build tree with this host's recompiler."""
+    rom = require_rom(args.rom, 'setup-game')
+    build = ROOT / 'local/build/desktop'
+    target = f'{"macos" if host.system == "darwin" else host.system}-{host.arch}'
+    recompiler = ROOT / 'local/dist/recompiler' / target / ('N64Recomp' + host.exe_suffix)
+    if not recompiler.is_file():
+        raise UsageError(f'{recompiler} not found: run `python tools/sc64.py build-recompiler` first')
+    data = ['--data', str(args.data_dir)] if args.data_dir else []
+    return [script('desktop/build.py', '--build-type', args.build_type, '--configure-only'),
+            ['cmake', '--build', str(build), '--target', 'sc64_setup', '-j', str(args.jobs)],
+            [str(build / ('sc64_setup' + host.exe_suffix)), '--rom', str(rom), '--recompiler', str(recompiler),
+             '--resources', str(build / 'setup-resources'), '--jobs', str(args.jobs), *data,
+             *(['--use-zig'] if args.use_zig else []), *(['--force'] if args.force else [])]]
 
 
 def apk_path(args: argparse.Namespace) -> Path:
@@ -334,6 +350,12 @@ def parser() -> argparse.ArgumentParser:
                          help='Python with spimdisasm for `recompile` (default: the project .venv, $RECOMP_PYTHON)')
     options.add_argument('--target', choices=RECOMPILER_TARGETS, default=os.environ.get('RECOMPILER_TARGET') or None,
                          help='build-recompiler/verify-recompiler: release target (default: this host; $RECOMPILER_TARGET)')
+    options.add_argument('--data-dir', type=Path, default=Path(os.environ['DATA_DIR']) if os.environ.get('DATA_DIR') else None,
+                         help='setup-game: where the game module goes (default: the game\'s storage folder; $DATA_DIR)')
+    options.add_argument('--use-zig', action='store_true', default=env_flag('USE_ZIG'),
+                         help='setup-game: build with the pinned zig instead of a system compiler ($USE_ZIG=1)')
+    options.add_argument('--force', action='store_true', default=env_flag('FORCE'),
+                         help='setup-game: rebuild even if the module is up to date ($FORCE=1)')
     options.add_argument('--analysis', type=Path, default=Path(os.environ['ANALYSIS']) if os.environ.get('ANALYSIS') else None,
                          help='recipe-export: analysis directory of a `recompile` run (default: $ANALYSIS)')
     options.add_argument('--baseline-replay', type=Path,
@@ -370,6 +392,8 @@ def parser() -> argparse.ArgumentParser:
     add('recompile', 'ROM -> local/generated/game (N64Recomp, analysis, observers, validation)', recompile_commands)
     add('recipe-verify', 'check recipe/ntsc-u and regenerate the game C from it; compare with its hashes (ADR-084)',
         recipe_commands)
+    add('setup-game', 'build the game module from --rom the way a user of the application does (ADR-087)',
+        setup_game_commands)
     add('build-recompiler', 'build the patched N64Recomp release binary into local/dist/recompiler (ADR-085)',
         build_recompiler_commands)
     add('verify-recompiler', 'run that binary on the recipe and compare every generated hash', verify_recompiler_commands)

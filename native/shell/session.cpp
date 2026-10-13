@@ -89,7 +89,19 @@ void Session::load_bundled(std::vector<std::uint8_t> rom, const std::filesystem:
 void Session::launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::path& storage, bool persist) {
     if (launched_) throw std::runtime_error("Runtime supports one session per process; restart to change ROM");
     runtime::validate_rom(rom, sha1);
-    game::load(storage);  // fails before any side effect when the game module is missing or mismatched
+    try {
+        game::load(storage);  // fails before any side effect when the game module is missing or mismatched
+    } catch (const game::ModuleError&) {
+#if defined(SC64_HAS_SETUP)
+        // No module yet: build it from this ROM in the background and start once it exists.
+        if (GameBuild::available() && !pending_) {
+            pending_ = PendingLaunch{rom, storage, persist};
+            build_.start(std::move(rom), storage);
+            return;
+        }
+#endif
+        throw;
+    }
     std::filesystem::create_directories(storage);
     // Validate every user-owned input before process-wide side effects. The
     // save image may be malformed; failing here leaves no audio device open.
@@ -114,6 +126,25 @@ void Session::launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::p
         audio::shutdown();
         throw;
     }
+}
+std::optional<std::string> Session::poll_build() {
+#if defined(SC64_HAS_SETUP)
+    if (!pending_) return std::nullopt;
+    const auto state = build_.poll();
+    if (!state) return std::nullopt;
+    if (state->running) return state->text;
+    auto pending = std::move(*pending_);
+    pending_.reset();
+    if (state->failed) return state->text;
+    try {
+        launch_rom(std::move(pending.rom), pending.storage, pending.persist);
+    } catch (const std::exception& error) {
+        return std::string(error.what());
+    }
+    return std::string();
+#else
+    return std::nullopt;
+#endif
 }
 void Session::start_runtime(std::vector<std::uint8_t> rom, const std::filesystem::path& storage) {
     raster = std::make_unique<gfx::RasterPool>(gfx::RasterPool::default_helpers());

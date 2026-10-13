@@ -37,12 +37,12 @@ endif
 endif
 SC64 = $(PYTHON) tools/sc64.py
 DOCKER_FLAG = $(if $(filter 1,$(DOCKER)),--docker)
-export ANALYSIS RECOMPILER_TARGET ROM BUNDLE_ROM RECOMP_PYTHON SERIAL ADB ANDROID_SDK APK STORAGE REPORT RUN_SECONDS SMOKE_SECONDS JOBS
+export ANALYSIS DATA_DIR FORCE USE_ZIG RECOMPILER_TARGET ROM BUNDLE_ROM RECOMP_PYTHON SERIAL ADB ANDROID_SDK APK STORAGE REPORT RUN_SECONDS SMOKE_SECONDS JOBS
 export BASELINE_REPLAY RENDERER_MANIFEST
 export PAGE_SIZE ANDROID_BACKEND ANDROID_DEBUGGABLE ANDROID_RENDER_DRIVER BUILD_TYPE
 
 # `make build-desktop`/`run-desktop`/`configure-desktop` are the older names of build/run/configure.
-.PHONY: help doctor venv bootstrap inventory recompile recipe-verify recipe-export build-recompiler verify-recompiler build build-macos build-desktop configure-desktop run run-desktop build-windows build-linux build-appimage \
+.PHONY: help doctor venv bootstrap inventory recompile recipe-verify recipe-export setup-game build-recompiler verify-recompiler build build-macos build-desktop configure-desktop run run-desktop build-windows build-linux build-appimage \
         build-android build-android-opengles icon configure-android check-apk devices install-android \
         run-android smoke-android audio-android benchmark-renderer test test-python test-native
 
@@ -52,6 +52,7 @@ help:
 	  'make inventory ROM="/path/game.z64"  Generate the libultra inventory (n64sym scan + emulator RDRAM capture)' \
 	  'make recompile ROM="/path/game.z64"  Generate local/generated/game from the ROM (runs inventory first if it is missing)' \
 	  'make recipe-verify ROM=...  Regenerate the game C from the committed recipe (recipe/ntsc-u) and compare hashes' \
+	  'make setup-game ROM=... [USE_ZIG=1] [DATA_DIR=...]  Build the game module from the ROM like a user would (sc64_setup)' \
 	  'make build-recompiler [RECOMPILER_TARGET=linux-x86_64]  Patched N64Recomp release binary in local/dist/recompiler' \
 	  'make verify-recompiler ROM=...  Run it on the recipe and compare the generated hashes' \
 	  'make recipe-export ANALYSIS=local/recompile/symbols-<stamp>  Refresh the recipe after a recompile (maintainers)' \
@@ -113,6 +114,9 @@ recipe-verify:
 
 recipe-export:
 	$(SC64) recipe-export
+
+setup-game:
+	$(SC64) setup-game
 
 build-recompiler:
 	$(SC64) build-recompiler $(DOCKER_FLAG)

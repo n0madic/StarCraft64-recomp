@@ -54,6 +54,24 @@ class SectionLayoutTests(unittest.TestCase):
             self.assertEqual(shim[name], real[name], name)
 
 
+class BuildFlagTests(unittest.TestCase):
+    """sc64_setup compiles the module with the flags cmake/game_module.cmake uses for the developer build."""
+    def test_setup_and_cmake_agree_on_the_flags_that_change_the_generated_code(self):
+        setup = (ROOT / 'native/setup/toolchain.cpp').read_text()
+        cmake = (ROOT / 'cmake/game_module.cmake').read_text()
+        for flag in ('-O2', '-fno-strict-aliasing', '-ffp-contract=off', '-fexceptions'):
+            self.assertIn(f'"{flag}"', setup, flag)
+            self.assertIn(flag, cmake, flag)
+        self.assertIn('"-fvisibility=hidden"', setup)
+        self.assertIn('C_VISIBILITY_PRESET hidden', cmake)
+
+    def test_setup_stages_every_file_the_module_build_includes(self):
+        staged = (ROOT / 'cmake/setup.cmake').read_text()
+        for name in ('module_main.c', 'sc64_module.h', 'sc64_imports.def', 'recomp.h', 'sections.h'):
+            self.assertIn(name, staged, name)
+        self.assertIn('"-I" + sources.module_dir', (ROOT / 'native/setup/toolchain.cpp').read_text())
+
+
 class SourcesTests(unittest.TestCase):
     def test_module_is_plain_c_without_runtime_headers(self):
         source = (MODULE / 'module_main.c').read_text()

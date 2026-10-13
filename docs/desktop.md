@@ -137,6 +137,24 @@ owned memory and creates no second copy. Such an image is strictly personal; nev
 share or upload it. The embedded runtime statically links libfuse (LGPL), which
 matters only if an image were ever distributed.
 
+## First run: building the game from your ROM
+
+Installed packages (stage 5) contain no game code. With `setup-resources/` and `N64Recomp` beside
+the application and no game module yet, starting the application with your NTSC-U ROM builds the
+module once (ADR-087): the start message shows the five steps, the module lands in
+`<storage>/game/sc64-game.*` with a `receipt.json`, and the game starts. The same step runs from a
+terminal:
+
+```sh
+make setup-game ROM="/path/to/your.z64" [USE_ZIG=1] [DATA_DIR=...] [FORCE=1]
+# or: sc64_setup --rom PATH [--data DIR] [--use-zig] [--force] [--no-download]
+```
+
+It needs a C compiler that passes a probe build (gcc, clang, Apple's clang); if none is found
+it downloads zig 0.16.0 (about 50-100 MB, pinned SHA-256) into `<storage>/tools` once, using the
+system `curl` and `tar` (`--no-download` forbids that). Logs of every run are kept in
+`<storage>/setup/logs/`. Nothing else is installed and no game code leaves the machine.
+
 ## Launch and controls
 
 ```sh
