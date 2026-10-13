@@ -2004,9 +2004,37 @@ inherits the build machine's glibc floor, unlike the pinned Debian image. Verifi
 here from macOS arm64: the macOS, Windows (mingw) and Linux (Docker) builds and the
 AppImage through the new driver, a macOS run with and without ROM, the Android
 APK build and audit (no device), the N64Recomp build step of `recompile`
-(the full chain stops at the missing libultra inventory), the linux/amd64
+(the inventory step is covered by ADR-083), the linux/amd64
 Dockerfile, and synthetic tests of host detection, tool discovery, dispatch and
 path mapping. A full host-compiler Linux x86_64 build and a `run` with dummy SDL
 drivers succeeded inside a linux/amd64 Debian container (emulated, not real
 hardware; 600 guest fields, no errors). The Windows-host (MSYS2) and
 Windows-host Docker paths are not exercised on real Windows (D-057).
+
+## ADR-083 — `make recompile` generates the resident libultra inventory (ACCEPTED)
+
+**Context:** `recompile_all.py` treated `local/reports/libultra-resident/inventory.json` as
+a prepared input: when it was missing the pipeline stopped, although every ingredient is
+reproducible. The inventory comes from `n64sym` candidates, a cold-boot RDRAM capture of the
+research emulator and the pinned reference objects. The RAM dump is required evidence
+(`prepare.py` rejects a reference match whose body is not verified equal to loaded RAM), so
+the equality cannot be assumed.
+
+**Decision:** `tools/research_libultra/ensure_inventory.py` (`sc64.py inventory`,
+`make inventory`) runs the chain for the resident section and `recompile_all.py` calls it when
+the default inventory is missing. Steps are skipped when their result exists, nothing existing
+is overwritten, captures and the inventory are staged beside their target and published only
+when complete, and the inventory must match `accepted.py` (346/121/51, all RAM-equal) or it is
+rejected and kept for diagnosis. `n64sym` is built when absent and run in Docker on its own
+platform when the host cannot execute it (`tools/dockerenv.py`, shared with the Linux package
+build and stdlib-only so the recompile `.venv` can import it). The research emulator and the
+ultralib reference objects stay prepared inputs that are diagnosed, not built. `pyelftools` joins
+the pinned `.venv` packages. `inventory.py` now reads the replacement set from the pinned
+N64Recomp commit instead of the working tree: the Stage 1 patch adds seven names, which made a
+regeneration report 57 instead of 51 names.
+
+**Consequences:** Verified on macOS arm64: the chain from an empty inventory took 28 s; the
+capture and inventory were identical across two runs; a full `recompile` with the regenerated
+inventory produced a byte-identical `local/generated/game` (86 files). The chain needs the
+research emulator, which has only been built on macOS (D-057), so Linux and Windows hosts
+need a prepared inventory or a macOS-built one. Menu and game sections remain manual.

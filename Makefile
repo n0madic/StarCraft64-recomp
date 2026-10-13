@@ -42,14 +42,15 @@ export BASELINE_REPLAY RENDERER_MANIFEST
 export PAGE_SIZE ANDROID_BACKEND ANDROID_DEBUGGABLE ANDROID_RENDER_DRIVER BUILD_TYPE
 
 # `make build-desktop`/`run-desktop`/`configure-desktop` are the older names of build/run/configure.
-.PHONY: help doctor venv bootstrap recompile build build-macos build-desktop configure-desktop run run-desktop build-windows build-linux build-appimage \
+.PHONY: help doctor venv bootstrap inventory recompile build build-macos build-desktop configure-desktop run run-desktop build-windows build-linux build-appimage \
         build-android build-android-opengles icon configure-android check-apk devices install-android \
         run-android smoke-android audio-android benchmark-renderer test test-python test-native
 
 help:
 	@printf '%s\n' \
 	  'make venv                   Create .venv with the pinned recompilation packages (spimdisasm)' \
-	  'make recompile ROM="/path/game.z64"  Generate local/generated/game from the ROM (needs the libultra inventory)' \
+	  'make inventory ROM="/path/game.z64"  Generate the libultra inventory (n64sym scan + emulator RDRAM capture)' \
+	  'make recompile ROM="/path/game.z64"  Generate local/generated/game from the ROM (runs inventory first if it is missing)' \
 	  'make doctor                 Check which build tools this machine has for each target' \
 	  'make build / build-desktop   Build the package of the OS you run on (macOS app, Linux or Windows package)' \
 	  'make build-macos            Build the macOS arm64 app bundle (macOS hosts only)' \
@@ -96,6 +97,9 @@ icon:
 
 venv:
 	$(SC64) venv
+
+inventory:
+	$(SC64) inventory
 
 recompile:
 	$(SC64) recompile

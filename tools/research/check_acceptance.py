@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from private_paths import require_local
 from rom_info import NTSC_U_SHA1 as ROM_SHA1, normalize_rom
 from summarize_capture import summarize
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'research_libultra'))
+import accepted
 
 UCODE_SHA1 = '7d0f686719afde0703d377ccc7a492318c01eec0'
 SCENES = {
@@ -145,15 +147,14 @@ def evaluate(root: Path, rom: bytes) -> dict:
     inventory_file = root / 'local/reports/libultra-resident/inventory.json'
     inventory = json.loads(inventory_file.read_text())
     require(inventory['rom_sha1'] == ROM_SHA1, 'libultra ROM mismatch')
-    require(inventory['mapping']['scan_end'] == 0xD6640, 'libultra scan spills into overlay')
-    require(len(inventory['reference_matches']) == 346, 'libultra reference count changed')
+    require(inventory['mapping']['scan_end'] == accepted.RESIDENT_SCAN_END, 'libultra scan spills into overlay')
+    require(len(inventory['reference_matches']) == accepted.ACCEPTED_REFERENCE_MATCHES, 'libultra reference count changed')
     require(all(row['ram_bytes_equal'] for row in inventory['reference_matches']),
             'libultra loaded body mismatch')
-    require(len(inventory['masked_crc_hits']) == 121 and
+    require(len(inventory['masked_crc_hits']) == accepted.ACCEPTED_CRC_HITS and
             all(row['ram_bytes_equal'] for row in inventory['masked_crc_hits']), 'CRC inventory changed')
-    body_candidates = [row for row in inventory['inventory']
-                       if row['reimplemented'] and (row['crc_bodies'] or row['reference_bytes'])]
-    require(len({row['name'] for row in body_candidates}) == 51, 'replacement inventory changed')
+    require(len(accepted.replacement_names(inventory)) == accepted.ACCEPTED_REPLACEMENT_NAMES,
+            'replacement inventory changed')
     bolt_file = root / 'local/reports/research/bolt-audit.json'
     bolt = json.loads(bolt_file.read_text())
     require(bolt['rom_sha1'] == ROM_SHA1 and bolt['directory_count'] == 23

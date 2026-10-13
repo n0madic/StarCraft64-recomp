@@ -233,7 +233,24 @@ class RecompileCommandTests(unittest.TestCase):
             self.assertEqual(len(commands(LINUX, 'venv')), 1)
 
     def test_pins_match_the_documented_environment(self):
-        self.assertEqual(driver.VENV_PACKAGES, ('spimdisasm==1.42.4', 'rabbitizer==1.16.2'))
+        self.assertEqual(driver.VENV_PACKAGES, ('spimdisasm==1.42.4', 'rabbitizer==1.16.2', 'pyelftools==0.33'))
+
+
+class InventoryCommandTests(unittest.TestCase):
+    def test_inventory_runs_the_generator_with_the_venv_python(self):
+        with clean_env(), tempfile.TemporaryDirectory() as directory, mock.patch.object(driver, 'ROOT', Path(directory)):
+            python = Path(directory) / '.venv/bin/python'
+            python.parent.mkdir(parents=True)
+            python.write_text('')
+            line = commands(LINUX, 'inventory', '--rom', '/g.z64')[0]
+            self.assertEqual(line[0], str(python))
+            self.assertEqual(Path(line[1]).name, 'ensure_inventory.py')
+            self.assertEqual(line[2:], ['/g.z64'])
+            self.assertEqual(commands(LINUX, 'inventory', '--rom', '/g.z64', '--dump', '/d.bin')[0][-2:], ['--dump', '/d.bin'])
+
+    def test_inventory_needs_the_dump_of_the_game(self):
+        with clean_env(), self.assertRaisesRegex(SystemExit, 'requires --rom'):
+            commands(LINUX, 'inventory')
 
 
 class BenchmarkCommandTests(unittest.TestCase):

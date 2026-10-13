@@ -16,7 +16,7 @@ import subprocess
 import tarfile
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 import sys
 
@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / 'tools/desktop'))
 import bootstrap
 import hostenv
 import patch_shell_runtime
+from dockerenv import CONTAINER_ROOT, Runner, container_path, ensure_image, in_container
 from hostenv import Host
 from icon import installed as installed_icon
 from game_validation import validate_ui_hooks
@@ -34,8 +35,6 @@ from rom_info import MAGIC_FORMATS
 
 RUNTIME = ROOT / 'local/deps/N64ModernRuntime-shell'
 DOCKERFILE = ROOT / 'tools/desktop/linux-cross.Dockerfile'
-# Where the repository appears inside the container when the host path cannot be reused.
-CONTAINER_ROOT = PurePosixPath('/work')
 TARGETS = {
     'windows': {'binary': 'StarCraft64.exe', 'profile': 'x86_64-windows', 'archive': '.zip'},
     'linux': {'binary': 'StarCraft64', 'profile': 'x86_64-linux', 'archive': '.tar.gz'},
@@ -52,50 +51,9 @@ def sha256(path: Path) -> str:
 def run(args: list[str | Path], **kwargs) -> None:
     subprocess.run([str(item) for item in args], check=True, **kwargs)
 
-def container_path(path: Path, host: Host) -> str:
-    """Path of ``path`` inside the container.
-
-    POSIX hosts mount the repository at its own absolute path, so CMake caches
-    stay valid and nothing needs translating. A Windows host path cannot exist
-    in a Linux container, so the repository is mounted at ``CONTAINER_ROOT``.
-    """
-    if host.system != 'windows':
-        return str(path)
-    return str(CONTAINER_ROOT / path.resolve().relative_to(ROOT).as_posix())
-
 def docker_image(host: Host | None = None) -> str:
-    """Build (or reuse) the local cross image, tagged by its Dockerfile hash."""
-    host = host or hostenv.current()
-    tag = 'sc64-linux-cross:' + sha256(DOCKERFILE)[:16]
-    present = subprocess.run(['docker', 'image', 'inspect', tag], capture_output=True).returncode == 0
-    if not present:
-        run(['docker', 'build', '--platform', host.docker_platform, '-t', tag, '-f', DOCKERFILE, DOCKERFILE.parent])
-    return tag
-
-def in_container(image: str, command: list[str], host: Host | None = None) -> list[str]:
-    host = host or hostenv.current()
-    user = ['--user', f'{os.getuid()}:{os.getgid()}'] if host.system != 'windows' else []
-    return ['docker', 'run', '--rm', '--platform', host.docker_platform, *user,
-            '-v', f'{ROOT}:{container_path(ROOT, host)}', '-w', container_path(ROOT, host), image, *command]
-
-@dataclass(frozen=True)
-class Runner:
-    """Runs tools on the host, or inside the Linux cross image when ``image`` is set."""
-    host: Host
-    image: str | None = None
-
-    def path(self, path: Path) -> str:
-        return container_path(path, self.host) if self.image else str(path)
-
-    def command(self, args: list[str | Path]) -> list[str]:
-        words = [self.path(item) if isinstance(item, Path) else str(item) for item in args]
-        return in_container(self.image, words, self.host) if self.image else words
-
-    def run(self, args: list[str | Path], **kwargs) -> None:
-        run(self.command(args), **kwargs)
-
-    def output(self, args: list[str | Path]) -> str:
-        return subprocess.run(self.command(args), check=True, capture_output=True, text=True).stdout
+    """The pinned local Linux cross image, built on first use."""
+    return ensure_image('sc64-linux-cross', DOCKERFILE, host)
 
 def audit(files: list[Path]) -> dict[str, str]:
     """Package members are authored resources and the binary: no private inputs."""

@@ -42,6 +42,33 @@ make VERSION=J TARGET=libultra_rom COMPARE=0 setup
 make VERSION=J TARGET=libultra_rom COMPARE=0 -j8
 ```
 
+## Automatic generation (resident section)
+
+`make inventory ROM=...` (`python tools/sc64.py inventory --rom ...`, also run by
+`make recompile` when the file is missing) executes `ensure_inventory.py`, which
+chains everything the resident-section command below needs and publishes
+`local/reports/libultra-resident/` only after the result matches the accepted Stage 0
+profile in `accepted.py` (346 reference matches, 121 masked-CRC hits, all equal to the
+loaded RAM, 51 replacement names):
+
+1. `n64sym` scans the ROM into `local/reports/libultra/n64sym-rom.splat.txt`. A missing
+   binary is built in place (`make`, or the local `n64sym.Dockerfile` image); an existing
+   binary that the host cannot execute (the shipped one is a static aarch64 Linux ELF) runs
+   in Docker on its own platform. Existing output is reused.
+2. `tools/research/run_capture.py reference-cold` records the cold-boot RDRAM
+   (`local/captures/research/reference-cold/end.rdram.bin`, about two minutes, reused when
+   present; `--dump` supplies another). The capture is deterministic: two runs gave the same
+   dump and the same inventory.
+3. `inventory.py` runs with the resident arguments below.
+
+The research emulator (`ares-test`, `docs/reference-capture.md` sections 1-2) and the
+reference objects in `third_party/ultralib/build` for versions I/J/K/L (see above) are
+prepared inputs; if one is missing the command stops and names it. Nothing existing is
+overwritten: an invalid inventory or a partial capture directory is reported and left for
+you to move aside. The pinned `symbol_lists.cpp` is read from the N64Recomp commit, not the
+working tree, so the Stage 1 recompiler patch does not change the replacement set. The menu
+and game sections stay manual.
+
 ## Reproduction
 
 Run the pinned `n64sym` binary against a normalized local image:

@@ -4,8 +4,10 @@
 Chains the documented Stage 1 steps: patch and build N64Recomp, analyze the ROM
 (prepare.py), add the guarded UI observers (add_ui_hooks.py), generate C
 (run_recompiler.py --replace) and validate the observers the shell build
-requires. The libultra inventory is a prepared input (see docs/libultra-inventory.md);
-it is verified, never rebuilt here. Run with the Python that has spimdisasm
+requires. The libultra inventory (docs/libultra-inventory.md) is generated first when the
+default one is missing (tools/research_libultra/ensure_inventory.py: n64sym scan,
+research-emulator RDRAM capture, validated against the accepted Stage 0 profile);
+an existing one is only verified, never rebuilt. Run with the Python that has spimdisasm
 (`tools/sc64.py recompile` uses the project .venv; `sc64.py venv` creates it).
 The recompiler is built with LLVM when found (macOS Homebrew or LLVM_BIN), else
 with CC/CXX or the system compiler. All outputs stay under ignored local/.
@@ -33,6 +35,7 @@ DEFAULT_INVENTORY = ROOT / "local/reports/libultra-resident/inventory.json"
 RECOMPILER_SOURCE = ROOT / "third_party/N64Recomp"
 RECOMPILER_BUILD = ROOT / "local/build/recompiler"
 DEFAULT_OUTPUT = ROOT / "local/generated/game"
+ENSURE_INVENTORY = ROOT / "tools/research_libultra/ensure_inventory.py"
 
 log = logging.getLogger("recompile_all")
 
@@ -57,9 +60,9 @@ def check_inputs(rom: Path, inventory: Path) -> None:
         raise PipelineError("Unsupported ROM: expected the NTSC-U z64 (big-endian) profile, "
                             f"SHA-1 {ROM_SHA1}; normalize byte order first")
     if not inventory.is_file():
-        raise PipelineError(f"Libultra inventory is a prepared input but is missing: {inventory}\n"
-                            "Build it once with tools/research_libultra/inventory.py "
-                            "(see docs/libultra-inventory.md), or pass --inventory")
+        raise PipelineError(f"Libultra inventory is missing: {inventory}\n"
+                            "Generate it with `python tools/sc64.py inventory` "
+                            "(see docs/libultra-inventory.md), or pass an existing --inventory")
     if json.loads(inventory.read_text()).get("rom_sha1") != ROM_SHA1:
         raise PipelineError(f"Inventory {inventory} belongs to a different ROM")
     try:
@@ -109,7 +112,11 @@ def main() -> None:
 
     rom = args.rom.resolve()
     output = require_local_or(sys.exit, args.output, root=ROOT, what="Generated output")
-    check_inputs(rom, args.inventory.resolve())
+    inventory = args.inventory.resolve()
+    if not inventory.is_file() and inventory == DEFAULT_INVENTORY.resolve():
+        # Only the default location is generated; an explicit --inventory must already exist.
+        run("generate libultra inventory", [sys.executable, ENSURE_INVENTORY, rom])
+    check_inputs(rom, inventory)
 
     build_recompiler(args.jobs)
 

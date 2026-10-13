@@ -238,7 +238,11 @@ def main() -> None:
             filtered.append(hit)
     references = filtered
 
-    source = strip_comments((args.recompiler / "src/symbol_lists.cpp").read_text())
+    # Read the committed (pinned) list, not the working tree: the Stage 1 patch
+    # (tools/recompile/patch_recompiler.py) adds names to it, which must not
+    # change what the pinned revision's replacement set contains.
+    source = strip_comments(subprocess.check_output(
+        ["git", "-C", str(args.recompiler), "show", "HEAD:src/symbol_lists.cpp"], text=True))
     reimplemented = set(re.findall(r'"([A-Za-z_][A-Za-z0-9_]*)"', source.split("reimplemented_funcs", 1)[1].split("};", 1)[0]))
     ignored = set(re.findall(r'"([A-Za-z_][A-Za-z0-9_]*)"', source.split("ignored_funcs", 1)[1].split("};", 1)[0]))
     wrappers = defaultdict(list)

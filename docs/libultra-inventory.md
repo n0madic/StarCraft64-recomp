@@ -4,7 +4,9 @@ ROM SHA-1: `a36d91b5aac7bb95df0d7de5f9814f5270e25c2b`.
 
 ## Method and version evidence
 
-Run the commands in [the inventory tool README](../tools/research_libultra/README.md). Pinned sources and privately built I/J/K/L reference objects are recorded there. The inventory compares complete masked instruction bodies, resolves incoming/outgoing relocations, and independently compares the loaded canonical RDRAM with ROM. CRC-only matches remain candidates. Relocation-only symbols are excluded from the replacement body table below.
+`make inventory` (also run by `make recompile` when the file is missing) regenerates the resident
+inventory and checks it against the counts below; the menu and game sections and the manual steps
+are in [the inventory tool README](../tools/research_libultra/README.md). Pinned sources and privately built I/J/K/L reference objects are recorded there. The inventory compares complete masked instruction bodies, resolves incoming/outgoing relocations, and independently compares the loaded canonical RDRAM with ROM. CRC-only matches remain candidates. Relocation-only symbols are excluded from the replacement body table below.
 
 GCC OS **libultra 2.0J family** is strongly identified by two independent, J-only complete reference-object matches:
 

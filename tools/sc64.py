@@ -38,9 +38,12 @@ NATIVE_TEST_TARGETS = (
     'sc64_host_telemetry_test', 'sc64_loop_watch_test')
 
 # Pins of the recompilation environment (the splat research workflow has its own, see
-# docs/research-workflow.md): `recompile_all.py` needs only spimdisasm and its disassembler.
-VENV_PACKAGES = ('spimdisasm==1.42.4', 'rabbitizer==1.16.2')
+# docs/research-workflow.md): `recompile_all.py` needs spimdisasm and its disassembler;
+# the libultra inventory step (`inventory`) reads reference objects with pyelftools.
+VENV_PACKAGES = ('spimdisasm==1.42.4', 'rabbitizer==1.16.2', 'pyelftools==0.33')
 RENDERER_BUILD = ROOT / 'local/build/renderer'
+INVENTORY = ROOT / 'local/reports/libultra-resident/inventory.json'
+EMULATOR = ROOT / 'local/toolchains/ares-build/test-runner/ares-test'
 RENDER_DRIVERS = ('vulkan', 'opengles2')  # tools/android/build.py RENDER_DRIVERS
 EMULATOR_DRIVER_LINE = re.compile(rb'^sc64\.render_driver = opengles2$', re.MULTILINE)
 ACTIVITY = adb_client.PACKAGE + '/com.nomadic.sc64.Sc64Activity'
@@ -208,6 +211,12 @@ def recompile_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     return [[str(recompile_python(host, args)), str(TOOLS / 'recompile/recompile_all.py'), str(rom), '--jobs', str(args.jobs)]]
 
 
+def inventory_commands(host: Host, args: argparse.Namespace) -> list[Command]:
+    rom = require_rom(args.rom, 'inventory')
+    dump = ['--dump', str(args.dump)] if args.dump else []
+    return [[str(recompile_python(host, args)), str(TOOLS / 'research_libultra/ensure_inventory.py'), str(rom), *dump]]
+
+
 def venv_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     python = hostenv.venv_python(ROOT, host)
     create = [] if python.is_file() else [[sys.executable, '-m', 'venv', str(ROOT / '.venv')]]
@@ -234,9 +243,21 @@ def recompile_requirements(host: Host) -> list[hostenv.Check]:
         probe = subprocess.run([str(python), '-c', 'import spimdisasm'], capture_output=True)
         spim = str(python) if probe.returncode == 0 else None
     source = ROOT / 'third_party/N64Recomp/CMakeLists.txt'
+    elftools = None
+    if python.is_file():
+        elftools = str(python) if subprocess.run([str(python), '-c', 'import elftools'], capture_output=True).returncode == 0 else None
+    references = ROOT / 'third_party/ultralib/build'
     return [hostenv.Check('project .venv with spimdisasm', spim, '`python tools/sc64.py venv`'),
+            hostenv.Check('project .venv with pyelftools (libultra inventory)', elftools, '`python tools/sc64.py venv`'),
             hostenv.Check('third_party/N64Recomp checkout', str(source.parent) if source.is_file() else None,
-                          'git submodule update --init --recursive third_party/N64Recomp')]
+                          'git submodule update --init --recursive third_party/N64Recomp'),
+            hostenv.Check('libultra inventory (or what generates it, below)',
+                          str(INVENTORY) if INVENTORY.is_file() else None, '`python tools/sc64.py inventory`'),
+            hostenv.Check('  research emulator (ares-test)', str(EMULATOR) if EMULATOR.is_file() else None,
+                          'build it per docs/reference-capture.md sections 1-2'),
+            hostenv.Check('  reference libultra objects', str(references) if all(
+                any((references / version).glob('lib*ultra*/src/**/*.o')) for version in 'IJKL') else None,
+                          'build them per tools/research_libultra/README.md')]
 
 
 def doctor(host: Host, args: argparse.Namespace) -> int:
@@ -283,6 +304,8 @@ def parser() -> argparse.ArgumentParser:
                          help='pack --rom into the AppImage/APK (personal use only; default: $BUNDLE_ROM=1)')
     options.add_argument('--report', type=Path, default=Path(os.environ['REPORT']) if os.environ.get('REPORT') else None,
                          help='new report directory under local/ (default: timestamped; default: $REPORT)')
+    options.add_argument('--dump', type=Path, default=None,
+                         help='inventory: use this canonical 8 MiB RDRAM dump instead of capturing one')
     options.add_argument('--recomp-python', type=Path,
                          default=Path(os.environ['RECOMP_PYTHON']) if os.environ.get('RECOMP_PYTHON') else None,
                          help='Python with spimdisasm for `recompile` (default: the project .venv, $RECOMP_PYTHON)')
@@ -315,6 +338,8 @@ def parser() -> argparse.ArgumentParser:
 
     add('doctor', 'check the tools this host has for each target', lambda h, a: doctor(h, a))
     add('venv', 'create .venv with the pinned recompilation packages', venv_commands)
+    add('inventory', 'generate local/reports/libultra-resident/inventory.json (also run by recompile when missing)',
+        inventory_commands)
     add('recompile', 'ROM -> local/generated/game (N64Recomp, analysis, observers, validation)', recompile_commands)
     add('benchmark-renderer', 'compare private renderer timings and exact output against a baseline',
         benchmark_commands)

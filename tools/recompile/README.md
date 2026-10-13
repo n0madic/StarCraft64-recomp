@@ -16,9 +16,12 @@ make recompile ROM="/path/to/your.z64"   # = python tools/sc64.py recompile --ro
 Both commands run unchanged on macOS, Linux and Windows (ADR-082); `RECOMP_PYTHON`
 or `--recomp-python` selects another interpreter than `.venv`. The recompiler is
 built with LLVM when it is found (Homebrew or `LLVM_BIN`), otherwise with `CC`/`CXX`
-or the system compiler. It needs the project `.venv` (spimdisasm) and the prepared libultra inventory
-`local/reports/libultra-resident/inventory.json`, which is verified but never
-rebuilt (see [libultra-inventory.md](../../docs/libultra-inventory.md)). Each run
+or the system compiler. It needs the project `.venv` (spimdisasm, pyelftools). The libultra inventory
+`local/reports/libultra-resident/inventory.json` is generated first when it is
+missing (`make inventory` / `sc64.py inventory` runs only that step; see
+[the inventory tool README](../research_libultra/README.md) and
+[libultra-inventory.md](../../docs/libultra-inventory.md)); an existing one is only
+verified, never rebuilt. Each run
 analyzes into a fresh `local/recompile/symbols-<timestamp>/`; an existing
 generated game is replaced transactionally and its previous output stays in the
 scratch directory. The result was verified byte-identical to the previous
