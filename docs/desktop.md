@@ -137,6 +137,23 @@ owned memory and creates no second copy. Such an image is strictly personal; nev
 share or upload it. The embedded runtime statically links libfuse (LGPL), which
 matters only if an image were ever distributed.
 
+## Release launcher packages
+
+```sh
+make build-recompiler && make verify-recompiler ROM=...   # once per target: the prebuilt N64Recomp
+make package            # the package of this OS (or package-macos / package-linux / package-windows)
+```
+
+They write `local/dist/launcher/StarCraft64-launcher-<os>-<arch>.{zip,tar.gz}` and a receipt in
+`local/reports/launcher/<os>.json` (source commit, file hashes, `game_derived: false`). Unlike
+`make build`, a launcher holds no ROM, generated code or game module and carries the neutral `SC64`
+icon (`neutral_icon.py`) instead of the one made from the title art, so it can be shared; the user's first start builds the game (next section). It contains the shell, `sc64_setup`,
+`N64Recomp`, `setup-resources/`, the font, `README.txt`, `NOTICE.txt`, `SOURCE.txt` and `LICENSES/`.
+The executables statically link the GPL-3.0 N64ModernRuntime, so `SOURCE.txt` names the repository
+commit that must be reachable (push it before publishing; `package.py` warns and refuses a dirty tree
+without `--allow-dirty`). macOS apps are sealed ad hoc but not notarized, Windows ones are unsigned:
+`README.txt` tells the user how to open them once (ADR-088, D-061).
+
 ## First run: building the game from your ROM
 
 Installed packages (stage 5) contain no game code. With `setup-resources/` and `N64Recomp` beside

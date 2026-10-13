@@ -45,7 +45,7 @@ add_library(sc64_shell STATIC
 target_include_directories(sc64_shell PUBLIC "${SC64_ROOT}/native/shell" "${SC64_ROOT}/native/runtime"
     "${SC64_TOOLCHAINS}")
 target_compile_definitions(sc64_shell PUBLIC SC64_SDL_VERSION="3.4.18")
-if(TARGET sc64_game_module)
+if(NOT SC64_STATIC_GAME)
     target_sources(sc64_shell PRIVATE ${SC64_ROOT}/native/shell/game_module.cpp)
     # recomp.h comes with the generated game's static library otherwise.
     target_include_directories(sc64_shell PUBLIC "${SC64_ROOT}/native/module" "${SC64_RUNTIME_DIR}/N64Recomp/include")
@@ -57,7 +57,7 @@ endif()
 target_link_libraries(sc64_shell PUBLIC sc64_gfx_core sc64_scripts sc64_sha librecomp ultramodern
     SDL3::SDL3-static Threads::Threads)
 
-if(TARGET sc64_game_module AND NOT ANDROID)
+if(NOT SC64_STATIC_GAME AND NOT ANDROID)
     # Loader test against synthetic modules built like the real one (shim headers, C only).
     set(SC64_FIXTURE_VARIANTS good:"" bad_abi:FIXTURE_BAD_ABI bad_layout:FIXTURE_BAD_LAYOUT bad_rom:FIXTURE_BAD_ROM
         refuse:FIXTURE_REFUSE no_init:FIXTURE_NO_INIT)

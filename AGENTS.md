@@ -55,6 +55,8 @@ User-facing discussion is normally Russian. All project documentation is English
 - `native/shell/`: SDL3 application (`app.cpp`), session, lifecycle, audio, mailbox,
   ROM import, presentation selection (`native.cpp`), video/overlay, host scripts.
 - `native/shell/input/`: SDL-free gesture/menu/HUD/minimap/touch-pad adapters.
+- `tools/desktop/package.py`, `notices.py`: release launcher packages and their license texts
+  (ADR-088). Launchers never contain the ROM, generated code, the game module or the game icon.
 - `native/setup/`: `sc64_setup` and its library, ROM to game module with the prebuilt N64Recomp and a
   probed compiler or pinned zig (ADR-087); the shell builds the module on first run through it.
 - `native/module/`: the game-module ABI (`sc64_module.h`, `sc64_imports.def`), `module_main.c`
@@ -141,6 +143,7 @@ make run ROM="/path/to/your.z64"      # runs an existing build
 make test-python                     # synthetic Python suite
 make test-native                     # private desktop configure/build + CTest
 make test                            # both suites
+make package                         # release launcher without game code: local/dist/launcher/
 make build-windows                   # local/dist/StarCraft64-windows.zip
 make build-linux                     # local/dist/StarCraft64-linux.tar.gz
 make build-appimage                  # local/dist/StarCraft64-x86_64.AppImage

@@ -39,6 +39,8 @@ target_include_directories(sc64_gfx_core PUBLIC ../gfx_core)
 target_link_libraries(sc64_gfx_core PUBLIC Threads::Threads)
 include("${SC64_ROOT}/cmake/gfx_optimize.cmake")
 sc64_optimize_gfx_targets(sc64_gfx_core)
+# Android links the generated game statically (ADR-086); desktop builds load it as a module.
+set(SC64_STATIC_GAME ON)
 include("${SC64_ROOT}/cmake/shell.cmake")
 add_executable(sc64_guest_fpu_test "${SC64_ROOT}/tests/native/test_guest_fpu.cpp")
 target_include_directories(sc64_guest_fpu_test PRIVATE "${SC64_ROOT}/native/runtime"

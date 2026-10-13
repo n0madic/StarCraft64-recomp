@@ -211,7 +211,7 @@ def main() -> None:
         raise SystemExit("Idle loop anchor changed")
     config += ("\n[[patches.hook]]\n" + f"func = {json.dumps(idle['name'])}\n"
                "before_vram = 0x80004994\n"
-               'text = "extern void sc64_idle_poll(uint8_t*); sc64_idle_poll(rdram);"\n')
+               'text = "{ extern void sc64_idle_poll(uint8_t*); sc64_idle_poll(rdram); }"\n')
     polls = find_memory_waits(rom_bytes, sections, ignored_body_names)
     # This adjacent loop compares current/next VI framebuffer through two real
     # OS wrappers rather than an inline memory load. It likewise needs host
@@ -227,7 +227,7 @@ def main() -> None:
     for poll in polls:
         config += ("\n[[patches.hook]]\n" + f"func = {json.dumps(poll['func'])}\n"
                    f"before_vram = 0x{poll['vram']:08X}\n"
-                   'text = "extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram);"\n')
+                   'text = "{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }"\n')
     (output / "poll-hooks.json").write_text(json.dumps(polls, indent=2) + "\n")
     (output / "sc64.toml").write_text(config)
     (output / "instruction-patches.json").write_text(json.dumps(instruction_patches, indent=2) + "\n")

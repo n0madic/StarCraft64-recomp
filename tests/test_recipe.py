@@ -48,7 +48,7 @@ value = 0
 [[patches.hook]]
 func = "sc64_resident_80000400"
 before_vram = 0x80000408
-text = "extern void sc64_ui_pick(uint8_t*, recomp_context*, unsigned); sc64_ui_pick(rdram, ctx, 3);"
+text = "{ extern void sc64_ui_pick(uint8_t*, recomp_context*, unsigned); sc64_ui_pick(rdram, ctx, 3); }"
 '''
 GENERATED = {
     'funcs.h': 'void f();\n',

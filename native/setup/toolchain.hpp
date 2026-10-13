@@ -45,8 +45,13 @@ Toolchain zig_toolchain(const std::filesystem::path& zig, const HostInfo& host, 
 // Compilers worth probing, in order: $CC (may carry arguments), then the usual names.
 std::vector<Toolchain> system_candidates(const HostInfo& host, const std::string& cc_env);
 // Fills in kind/version and builds a tiny module the way the real one is built; nullopt if that fails.
+// `module_dir` holds the module sources (recomp.h, sections.h shim); the probe uses them when present.
 std::optional<Toolchain> probe(const Runner& run, Toolchain candidate, const HostInfo& host,
-                               const std::filesystem::path& scratch);
-// The text of the probe's source (a C file with the constructs the module uses).
-std::string probe_source();
+                               const std::filesystem::path& scratch, const std::filesystem::path& module_dir = {});
+// The probe's source. `full` builds what the game module is made of: recomp.h, a function in the shape of
+// the recompiler's output (a label followed by a hook block, gotos, a jump-table switch, the memory, float
+// and function-lookup macros) and a section table with designated initializers. A compiler that cannot
+// build this cannot build the game, and is rejected before any code is generated. Without `full` (no
+// recomp.h beside the module sources) a self-contained subset is used.
+std::string probe_source(bool full);
 }

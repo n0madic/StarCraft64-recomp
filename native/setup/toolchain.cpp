@@ -1,4 +1,5 @@
 #include "toolchain.hpp"
+#include "recipe.hpp"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -91,8 +92,9 @@ std::vector<Toolchain> system_candidates(const HostInfo& host, const std::string
     return result;
 }
 
-std::string probe_source() {
-    return R"(#include <stdint.h>
+std::string probe_source(bool full) {
+    if (!full) {
+        return R"(#include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 #include <math.h>
@@ -102,10 +104,60 @@ static void leaf(uint8_t* r, void* c) { (void)c; r[0] = (uint8_t)fabs(-1.0); }
 static Entry table[] = { { .f = leaf, .n = 1 } };
 __attribute__((visibility("default"))) const Entry* sc64_probe(void) { assert(table[0].n == 1); return table; }
 )";
+    }
+    // Shapes copied from the generated game: funcs_*.c and recomp_overlays.inl. The host functions the game
+    // calls are defined here as the trampolines of module_main.c are, so that the shared object links.
+    return R"(#include "recomp.h"
+#include "librecomp/sections.h"
+
+recomp_func_t* get_function(int32_t vram) { (void)vram; return 0; }
+void switch_error(const char* func, uint32_t vram, uint32_t jtbl) { (void)func; (void)vram; (void)jtbl; }
+void sc64_guest_poll(uint8_t* rdram) { (void)rdram; }
+
+RECOMP_FUNC void sc64_probe_function(uint8_t* rdram, recomp_context* ctx) {
+    uint64_t hi = 0, lo = 0, result = 0;
+    int c1cs = 0;
+    gpr jr_addend_80005244 = ctx->r3;
+    (void)hi; (void)lo; (void)result; (void)c1cs;
+    ctx->r29 = S32(0X803F << 16);
+    ctx->r8 = ADD32(ctx->r8, 0X5A40);
+    if (ctx->r8 == ctx->r9) {
+        ctx->r6 = ADD32(ctx->r4, 0X1);
+
+            goto L_80000430;
+    }
+L_80000420:
+    { extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }
+    ctx->r2 = MEM_W(ctx->r3, 0X0);
+    MEM_W(0X10, ctx->r29) = ctx->r31;
+    ctx->f0.fl = CVT_S_W(ctx->f0.u32l);
+    if (ctx->r2 != 0) {
+
+            goto L_80000420;
+    }
+L_80000430:
+    switch (jr_addend_80005244 >> 2) {
+        case 0: goto L_80000420; break;
+        case 1: goto L_80000430; break;
+        default: switch_error(__func__, 0x80005244, 0x80000518);
+    }
+    LOOKUP_FUNC(ctx->r8)(rdram, ctx);
+    return;
+}
+
+static FuncEntry probe_funcs[] = {
+    { .func = sc64_probe_function, .offset = 0x00000000, .rom_size = 0x0000003C },
+};
+static SectionTableEntry probe_sections[] = {
+    { .rom_addr = 0x00001000, .ram_addr = 0x80000400, .size = 0x000D5640, .funcs = probe_funcs,
+      .num_funcs = ARRLEN(probe_funcs), .relocs = nullptr, .num_relocs = 0, .index = 0 },
+};
+__attribute__((visibility("default"))) const SectionTableEntry* sc64_probe(void) { return probe_sections; }
+)";
 }
 
 std::optional<Toolchain> probe(const Runner& run, Toolchain candidate, const HostInfo& host,
-                               const std::filesystem::path& scratch) {
+                               const std::filesystem::path& scratch, const std::filesystem::path& module_dir) {
     std::filesystem::create_directories(scratch);
     Command version{candidate.program, candidate.prefix, {}, candidate.env};
     version.args.push_back("--version");
@@ -116,10 +168,12 @@ std::optional<Toolchain> probe(const Runner& run, Toolchain candidate, const Hos
     candidate.kind = folded.find("zig") != std::string::npos ? "zig" : folded.find("clang") != std::string::npos ? "clang" : "gcc";
     candidate.version = text.substr(0, text.find('\n'));
     const auto source = scratch / "probe.c";
-    std::ofstream(source) << probe_source();
+    std::error_code header_error;
+    const bool full = !module_dir.empty() && std::filesystem::is_regular_file(module_dir / "recomp.h", header_error);
+    write_file(source, probe_source(full));  // binary: the same bytes on every host
     const auto object = scratch / "probe.o";
     const auto output = scratch / ("probe" + host.module_suffix);
-    ModuleSources none{scratch, scratch, "0"};
+    ModuleSources none{full ? module_dir : scratch, scratch, "0"};
     try {
         const auto log = scratch / "probe.log";
         if (run({candidate.program, compile_args(candidate, host, none, source, object), log, candidate.env}) != 0) return std::nullopt;

@@ -122,6 +122,15 @@ def test_native_commands(host: Host, args: argparse.Namespace) -> list[Command]:
             ['ctest', '--test-dir', str(build), '--output-on-failure']]
 
 
+def package_commands(target: str | None):
+    """Release launcher package (ADR-088): `target` None means this host's own OS."""
+    def commands(host: Host, args: argparse.Namespace) -> list[Command]:
+        name = target or {'darwin': 'macos'}.get(host.system, host.system)
+        extra = [*(['--docker'] if args.docker else []), *(['--allow-dirty'] if args.allow_dirty else [])]
+        return [script('desktop/package.py', name, '--jobs', str(args.jobs), '--build-type', args.build_type, *extra)]
+    return commands
+
+
 def setup_game_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     """Run sc64_setup (ROM -> game module, ADR-087) from the desktop build tree with this host's recompiler."""
     rom = require_rom(args.rom, 'setup-game')
@@ -356,6 +365,8 @@ def parser() -> argparse.ArgumentParser:
                          help='setup-game: build with the pinned zig instead of a system compiler ($USE_ZIG=1)')
     options.add_argument('--force', action='store_true', default=env_flag('FORCE'),
                          help='setup-game: rebuild even if the module is up to date ($FORCE=1)')
+    options.add_argument('--allow-dirty', action='store_true', default=env_flag('ALLOW_DIRTY'),
+                         help='package: allow uncommitted changes (SOURCE.txt then does not describe the build; $ALLOW_DIRTY=1)')
     options.add_argument('--analysis', type=Path, default=Path(os.environ['ANALYSIS']) if os.environ.get('ANALYSIS') else None,
                          help='recipe-export: analysis directory of a `recompile` run (default: $ANALYSIS)')
     options.add_argument('--baseline-replay', type=Path,
@@ -392,6 +403,11 @@ def parser() -> argparse.ArgumentParser:
     add('recompile', 'ROM -> local/generated/game (N64Recomp, analysis, observers, validation)', recompile_commands)
     add('recipe-verify', 'check recipe/ntsc-u and regenerate the game C from it; compare with its hashes (ADR-084)',
         recipe_commands)
+    add('package', 'release launcher package of this OS: shell, sc64_setup, N64Recomp, no game code (ADR-088)',
+        package_commands(None))
+    add('package-macos', 'macOS arm64 launcher zip (macOS arm64 hosts only)', package_commands('macos'))
+    add('package-linux', 'Linux x86_64 launcher tar.gz (host compiler on Linux x86_64, else Docker)', package_commands('linux'))
+    add('package-windows', 'Windows x86_64 launcher zip (mingw-w64)', package_commands('windows'))
     add('setup-game', 'build the game module from --rom the way a user of the application does (ADR-087)',
         setup_game_commands)
     add('build-recompiler', 'build the patched N64Recomp release binary into local/dist/recompiler (ADR-085)',

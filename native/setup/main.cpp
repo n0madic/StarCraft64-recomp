@@ -1,4 +1,5 @@
 // sc64_setup: builds the game module from your own ROM (ADR-087).
+#include "locate.hpp"
 #include "setup.hpp"
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_stdinc.h>
@@ -60,10 +61,14 @@ int main(int argc, char** argv) {
         }
         if (options.rom.empty()) { usage(); return 2; }
         if (options.data_dir.empty()) options.data_dir = default_data_dir();
-        if (options.resources.empty()) options.resources = here / "setup-resources";
+        if (options.resources.empty()) {
+            options.resources = first_directory(resource_candidates(here));
+            if (options.resources.empty()) options.resources = here / "setup-resources";
+        }
         if (options.recompiler.empty()) {
             if (const char* env = std::getenv("SC64_RECOMPILER")) options.recompiler = fs::u8path(env);
-            else options.recompiler = here / ("N64Recomp" + host_info().exe_suffix);
+            else options.recompiler = first_file(recompiler_candidates(here, host_info()));
+            if (options.recompiler.empty()) options.recompiler = here / ("N64Recomp" + host_info().exe_suffix);
         }
         Reporter report;
         report.step = [](int step, int total, const std::string& text) { std::printf("[%d/%d] %s\n", step, total, text.c_str()); std::fflush(stdout); };

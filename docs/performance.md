@@ -167,3 +167,35 @@ python3 tools/renderer/benchmark.py local/inputs/renderer/manifest.json \
 
 Live telemetry adds `software_service_ms` (guest servicing inside `software_ms`)
 and `raster_helpers`.
+
+## Game module optimization level: -O2 against -O3 (2026-10-13)
+
+Question: should the game module (ADR-086/087) be compiled with `-O3` instead of `-O2`?
+
+**Method.** The first mission ("1. Wasteland", `guest_mode 3`, `ui_mode game`) is reached with a
+field-timed controller recipe plus one `ui_click` on the campaign list item (coordinates from the
+`ui_items` telemetry) and `A` for every advisor message. The module was built twice with the same
+Homebrew clang 23 and flags (`-std=c17 -fno-strict-aliasing -ffp-contract=off -fexceptions
+-fvisibility=hidden`), only `-O2` or `-O3` differing; `SC64_GAME_MODULE` selected it. After fields 4800
+the process was sampled by macOS `sample` for 30 s (1 ms interval, 1801-1802 fields); the leaf samples
+whose image is `sc64-game.dylib` are the guest compute. Three runs per level, interleaved. A time-based
+total (process CPU) cannot be used: the scene is dominated by the software rasterizer and by waiting.
+
+| | -O2 | -O3 |
+|---|---|---|
+| Module leaf samples per 30 s, three runs | 380, 457, 394 | 390, 451, 414 |
+| Mean (run-to-run spread) | 410 ms (10%) | 418 ms (7%) |
+| Per field | 0.228 ms | 0.232 ms |
+| Share of one core | 1.37% | 1.39% |
+| `sc64_app` samples (rasterizer, host) | about 14 800 | about 14 950 |
+| Module size, compile time (8 jobs) | 3.28 MB, 2.3 s | 3.29 MB, 2.0 s |
+
+**Result.** Guest code is about 1.4% of one core in this scene (the host is about 50%), and `-O3`
+differs from `-O2` by +1.9%, less than the run-to-run spread: no measurable gain, no size change. `-O2`
+stays (ADR-087). Frame equality of `-O3`: the intro frames matched `-O2` for every task index traced
+(28/28 and 29/29, two `-O2` runs as control); the menu and the mission differ even between two `-O2` runs
+(cursor and game time follow the host clock), so equality could not be shown there.
+
+**Limits.** One calm opening scene (idle marines, no combat); a battle may load the guest more but cannot
+make it comparable to the 50% of the host. macOS arm64 and clang only (GCC and zig were not compared);
+the sampler resolves 1 ms and counts only symbols with at least 5 samples per symbol list.

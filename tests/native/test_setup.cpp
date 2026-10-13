@@ -1,4 +1,5 @@
 // sc64_setup (ADR-087): recipe, toolchain commands and the whole flow against a fake process runner.
+#include "locate.hpp"
 #include "process.hpp"
 #include "recipe.hpp"
 #include "rom_image.hpp"
@@ -96,6 +97,26 @@ void test_process() {
     try { run_batch([](const Command&) -> int { throw std::runtime_error("spawn"); }, {Command{"x", {}, {}}}, 2); }
     catch (const std::runtime_error&) { batch_threw = true; }
     CHECK(batch_threw);
+}
+
+// ---- locations ----
+void test_locate() {
+    const HostInfo linux{"linux", "x86_64", ".so", ""}, windows{"windows", "x86_64", ".dll", ".exe"};
+    const fs::path root = fs::temp_directory_path() / "sc64-setup-test-locate";
+    fs::remove_all(root);
+    // A macOS bundle: base is Contents/Resources, N64Recomp sits in Contents/MacOS.
+    const fs::path resources = root / "App.app/Contents/Resources", macos = root / "App.app/Contents/MacOS";
+    write(resources / "setup-resources/recipe/x", "x");
+    write(macos / "N64Recomp", "binary");
+    CHECK(first_directory(resource_candidates(resources)) == (resources / "setup-resources"));
+    CHECK(first_file(recompiler_candidates(resources, linux)) == (macos / "N64Recomp"));
+    CHECK(recompiler_candidates(resources, windows)[0].filename() == "N64Recomp.exe");
+    // A plain folder: everything beside the executable, and that wins over the bundle layout.
+    write(resources / "N64Recomp", "binary");
+    CHECK(first_file(recompiler_candidates(resources, linux)) == (resources / "N64Recomp"));
+    CHECK(first_directory(resource_candidates(root / "nowhere")).empty());
+    CHECK(first_file(recompiler_candidates(root / "nowhere", linux)).empty());
+    fs::remove_all(root);
 }
 
 // ---- recipe ----
@@ -199,7 +220,18 @@ void test_toolchain() {
     CHECK(candidates[1].program == "cc" && candidates[3].program == "gcc");
     CHECK(system_candidates(windows, "")[0].program == "gcc");
     CHECK(system_candidates(mac, "cc").size() == 3);  // $CC=cc is not probed twice
-    CHECK(probe_source().find("visibility") != std::string::npos);
+    // The probe builds what the game is made of, shape by shape.
+    const std::string full = probe_source(true), small = probe_source(false);
+    for (const char* shape : {"#include \"recomp.h\"", "RECOMP_FUNC void", "goto L_80000420;", "switch (jr_addend_80005244 >> 2)",
+                              "default: switch_error(__func__", "LOOKUP_FUNC(ctx->r8)(rdram, ctx);", "MEM_W(0X10, ctx->r29)",
+                              "CVT_S_W(", ".func = sc64_probe_function", ".relocs = nullptr", "ARRLEN(probe_funcs)",
+                              "gpr jr_addend_80005244", "recomp_func_t* get_function(int32_t vram)", "void switch_error(const char* func",
+                              "void sc64_guest_poll(uint8_t* rdram) {"})
+        check(full.find(shape) != std::string::npos, shape, __LINE__);
+    // A hook block directly after a label: the construct that pre-C23 compilers reject when it is a bare declaration.
+    CHECK(full.find("L_80000420:\n    { extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }") != std::string::npos);
+    CHECK(full.find("extern void sc64_guest_poll(uint8_t*);\n") == std::string::npos);  // never bare
+    CHECK(small.find("recomp.h") == std::string::npos && small.find("visibility") != std::string::npos);
 }
 
 // ---- the whole flow ----
@@ -210,6 +242,7 @@ struct World {
     std::mutex mutex;
     bool tamper = false, recompiler_exit = false, diagnostics = false, compile_fail = false, no_compiler = false;
     bool zig_download_fails = true;
+    bool with_recomp_header = false;
     std::string module_marker = "v1";
 
     std::map<std::string, std::string> generated_files() const {
@@ -239,6 +272,7 @@ struct World {
         write(resources / "recipe/ntsc-u/sc64.toml", config);
         write(resources / "recipe/ntsc-u/generated.json", manifest.dump());
         write(resources / "module/module_main.c", "int main_module;\n");
+        if (with_recomp_header) write(resources / "module/recomp.h", "// stand-in\n");
         set_abi(1);
     }
     void set_abi(int abi) { write(resources / "module/sc64_module.h", "#define SC64_MODULE_ABI " + std::to_string(abi) + "\n"); }
@@ -320,6 +354,17 @@ void test_flow() {
         write(first.module, "tampered module");  // a module that no longer matches its receipt is rebuilt
         CHECK(run_setup(w.options(), w.runner(), report).rebuilt);
         fs::remove_all(w.root);
+    }
+    {   // The probe is the real-shape one only when recomp.h is beside the module sources.
+        for (const bool header : {false, true}) {
+            World w; w.with_recomp_header = header; w.make();
+            const Result built = run_setup(w.options(), w.runner(), report);
+            std::string probe;
+            for (const auto& e : fs::recursive_directory_iterator(built.logs))
+                if (e.path().filename() == "probe.c" && e.path().parent_path().filename() == "probe-0") probe = sc64::setup::read_file(e.path());
+            CHECK(probe == probe_source(header));
+            fs::remove_all(w.root);
+        }
     }
     {   // The recompiler and its output are verified before anything is compiled.
         World w; w.make(); w.tamper = true;
@@ -404,6 +449,7 @@ int main(int argc, char** argv) {
     }
     argv0 = argv[0];
     test_process();
+    test_locate();
     test_recipe();
     test_toolchain();
     test_flow();

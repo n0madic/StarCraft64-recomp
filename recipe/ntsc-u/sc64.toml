@@ -69,52 +69,52 @@ value = 0
 [[patches.hook]]
 func = "sc64_resident_800048D8"
 before_vram = 0x80004994
-text = "extern void sc64_idle_poll(uint8_t*); sc64_idle_poll(rdram);"
+text = "{ extern void sc64_idle_poll(uint8_t*); sc64_idle_poll(rdram); }"
 
 [[patches.hook]]
 func = "sc64_resident_80004770"
 before_vram = 0x800047EC
-text = "extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram);"
+text = "{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }"
 
 [[patches.hook]]
 func = "sc64_resident_800399F0"
 before_vram = 0x80039BAC
-text = "extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram);"
+text = "{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }"
 
 [[patches.hook]]
 func = "sc64_resident_80091FA0"
 before_vram = 0x80092014
-text = "extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram);"
+text = "{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }"
 
 [[patches.hook]]
 func = "sc64_resident_80091FA0"
 before_vram = 0x80092034
-text = "extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram);"
+text = "{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }"
 
 [[patches.hook]]
 func = "sc64_resident_80091FA0"
 before_vram = 0x80092338
-text = "extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram);"
+text = "{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }"
 
 [[patches.hook]]
 func = "sc64_resident_80091FA0"
 before_vram = 0x80092354
-text = "extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram);"
+text = "{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }"
 
 [[patches.hook]]
 func = "sc64_resident_8009239C"
 before_vram = 0x8009242C
-text = "extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram);"
+text = "{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }"
 
 [[patches.hook]]
 func = "sc64_resident_8009239C"
 before_vram = 0x8009243C
-text = "extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram);"
+text = "{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }"
 
 [[patches.hook]]
 func = "sc64_resident_800925AC"
 before_vram = 0x800925B8
-text = "extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram);"
+text = "{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }"
 
 [[patches.instruction]]
 func = "sc64_menu_80128C7C"
@@ -124,114 +124,114 @@ value = 0
 [[patches.hook]]
 func = "sc64_menu_80128C7C"
 before_vram = 0x80129ADC
-text = "extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 0);"
+text = "{ extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 0); }"
 
 [[patches.hook]]
 func = "sc64_menu_80125E7C"
 before_vram = 0x8012793C
-text = "extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 1);"
+text = "{ extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 1); }"
 
 [[patches.hook]]
 func = "sc64_menu_80125E7C"
 before_vram = 0x80126A40
-text = "extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 2);"
+text = "{ extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 2); }"
 
 [[patches.hook]]
 func = "sc64_menu_80125E7C"
 before_vram = 0x80127010
-text = "extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 3);"
+text = "{ extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 3); }"
 
 [[patches.hook]]
 func = "sc64_menu_80125E7C"
 before_vram = 0x801277F4
-text = "extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 4);"
+text = "{ extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 4); }"
 
 [[patches.hook]]
 func = "sc64_resident_800661DC"
 before_vram = 0x800661DC
-text = "extern void sc64_ui_blit(uint8_t*, recomp_context*); sc64_ui_blit(rdram, ctx);"
+text = "{ extern void sc64_ui_blit(uint8_t*, recomp_context*); sc64_ui_blit(rdram, ctx); }"
 
 [[patches.hook]]
 func = "sc64_menu_80127DB4"
 before_vram = 0x80128274
-text = "extern void sc64_ui_briefing(uint8_t*, recomp_context*, unsigned); sc64_ui_briefing(rdram, ctx, 1);"
+text = "{ extern void sc64_ui_briefing(uint8_t*, recomp_context*, unsigned); sc64_ui_briefing(rdram, ctx, 1); }"
 
 [[patches.hook]]
 func = "sc64_menu_80127DB4"
 before_vram = 0x80128900
-text = "extern void sc64_ui_briefing(uint8_t*, recomp_context*, unsigned); sc64_ui_briefing(rdram, ctx, 0);"
+text = "{ extern void sc64_ui_briefing(uint8_t*, recomp_context*, unsigned); sc64_ui_briefing(rdram, ctx, 0); }"
 
 [[patches.hook]]
 func = "sc64_resident_80007C7C"
 before_vram = 0x80007DC4
-text = "extern void sc64_ui_hud_begin(uint8_t*, recomp_context*); sc64_ui_hud_begin(rdram, ctx);"
+text = "{ extern void sc64_ui_hud_begin(uint8_t*, recomp_context*); sc64_ui_hud_begin(rdram, ctx); }"
 
 [[patches.hook]]
 func = "sc64_resident_80007C7C"
 before_vram = 0x80007EC8
-text = "extern void sc64_ui_hud_font(uint8_t*, recomp_context*, unsigned); sc64_ui_hud_font(rdram, ctx, 0);"
+text = "{ extern void sc64_ui_hud_font(uint8_t*, recomp_context*, unsigned); sc64_ui_hud_font(rdram, ctx, 0); }"
 
 [[patches.hook]]
 func = "sc64_resident_80007C7C"
 before_vram = 0x80007FBC
-text = "extern void sc64_ui_hud_font(uint8_t*, recomp_context*, unsigned); sc64_ui_hud_font(rdram, ctx, 1);"
+text = "{ extern void sc64_ui_hud_font(uint8_t*, recomp_context*, unsigned); sc64_ui_hud_font(rdram, ctx, 1); }"
 
 [[patches.hook]]
 func = "sc64_resident_80007C7C"
 before_vram = 0x80007FC4
-text = "extern void sc64_ui_hud_font(uint8_t*, recomp_context*, unsigned); sc64_ui_hud_font(rdram, ctx, 2);"
+text = "{ extern void sc64_ui_hud_font(uint8_t*, recomp_context*, unsigned); sc64_ui_hud_font(rdram, ctx, 2); }"
 
 [[patches.hook]]
 func = "sc64_resident_80007C7C"
 before_vram = 0x80007FF8
-text = "extern void sc64_ui_hud_end(uint8_t*, recomp_context*); sc64_ui_hud_end(rdram, ctx);"
+text = "{ extern void sc64_ui_hud_end(uint8_t*, recomp_context*); sc64_ui_hud_end(rdram, ctx); }"
 
 [[patches.hook]]
 func = "sc64_resident_80008048"
 before_vram = 0x80008288
-text = "extern void sc64_ui_hud_present(uint8_t*, recomp_context*); sc64_ui_hud_present(rdram, ctx);"
+text = "{ extern void sc64_ui_hud_present(uint8_t*, recomp_context*); sc64_ui_hud_present(rdram, ctx); }"
 
 [[patches.hook]]
 func = "sc64_menu_80128C7C"
 before_vram = 0x80129D64
-text = "extern void sc64_ui_main(uint8_t*, recomp_context*, unsigned); sc64_ui_main(rdram, ctx, 0);"
+text = "{ extern void sc64_ui_main(uint8_t*, recomp_context*, unsigned); sc64_ui_main(rdram, ctx, 0); }"
 
 [[patches.hook]]
 func = "sc64_menu_80128C7C"
 before_vram = 0x80129BEC
-text = "extern void sc64_ui_main(uint8_t*, recomp_context*, unsigned); sc64_ui_main(rdram, ctx, 1);"
+text = "{ extern void sc64_ui_main(uint8_t*, recomp_context*, unsigned); sc64_ui_main(rdram, ctx, 1); }"
 
 [[patches.hook]]
 func = "sc64_menu_80128C7C"
 before_vram = 0x8012A2A8
-text = "extern void sc64_ui_main(uint8_t*, recomp_context*, unsigned); sc64_ui_main(rdram, ctx, 2);"
+text = "{ extern void sc64_ui_main(uint8_t*, recomp_context*, unsigned); sc64_ui_main(rdram, ctx, 2); }"
 
 [[patches.hook]]
 func = "sc64_menu_80128C7C"
 before_vram = 0x8012A2A0
-text = "extern void sc64_ui_main(uint8_t*, recomp_context*, unsigned); sc64_ui_main(rdram, ctx, 3);"
+text = "{ extern void sc64_ui_main(uint8_t*, recomp_context*, unsigned); sc64_ui_main(rdram, ctx, 3); }"
 
 [[patches.hook]]
 func = "sc64_menu_801232C8"
 before_vram = 0x80123688
-text = "extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 5);"
+text = "{ extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 5); }"
 
 [[patches.hook]]
 func = "sc64_menu_801232C8"
 before_vram = 0x8012376C
-text = "extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 6);"
+text = "{ extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 6); }"
 
 [[patches.hook]]
 func = "sc64_menu_801232C8"
 before_vram = 0x80123830
-text = "extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 7);"
+text = "{ extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, 7); }"
 
 [[patches.hook]]
 func = "sc64_resident_8001ACF8"
 before_vram = 0x8001AD78
-text = "extern void sc64_ui_pick(uint8_t*, recomp_context*, unsigned); sc64_ui_pick(rdram, ctx, 1);"
+text = "{ extern void sc64_ui_pick(uint8_t*, recomp_context*, unsigned); sc64_ui_pick(rdram, ctx, 1); }"
 
 [[patches.hook]]
 func = "sc64_resident_8001AE94"
 before_vram = 0x8001AE94
-text = "extern void sc64_ui_pick(uint8_t*, recomp_context*, unsigned); sc64_ui_pick(rdram, ctx, 0);"
+text = "{ extern void sc64_ui_pick(uint8_t*, recomp_context*, unsigned); sc64_ui_pick(rdram, ctx, 0); }"

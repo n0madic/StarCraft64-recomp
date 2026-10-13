@@ -188,6 +188,11 @@ All other names are the property of their respective owners.
 - **Builds are personal.** Recompiled game code and any build that contains it
   (including an APK or AppImage with the ROM bundled) are for the owner's private use only and
   must not be shared or uploaded.
+- **Launcher packages.** `make package` builds a release launcher that contains no game code and no
+  ROM (shell, `sc64_setup`, the recompiler and the committed recipe); the first start builds the game
+  from the user's ROM ([desktop guide](docs/desktop.md)). These executables statically link the
+  GPL-3.0 N64ModernRuntime: they carry the license texts, a notice and a statement of where their
+  source is (`NOTICE.txt`, `SOURCE.txt`).
 - **Licensing.** Original source and documentation are MIT-licensed ([LICENSE](LICENSE)).
   The licence grants no rights to the game, its ROM, assets or trademarks.
   `tools/bolt_extract.py` and `tools/research/bolt_audit.py` are ports of

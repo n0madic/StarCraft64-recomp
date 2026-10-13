@@ -120,7 +120,7 @@ class RunAndTestTests(unittest.TestCase):
 
 def clean_env(**extra):
     """Environment without any variable the driver reads, so tests do not depend on the caller's shell."""
-    names = ('DATA_DIR', 'FORCE', 'USE_ZIG', 'ROM', 'BUNDLE_ROM', 'RECOMP_PYTHON', 'BASELINE_REPLAY', 'RENDERER_MANIFEST', 'JOBS', 'BUILD_TYPE', 'STORAGE', 'REPORT', 'RUN_SECONDS', 'SERIAL', 'ADB', 'ANDROID_SDK',
+    names = ('ALLOW_DIRTY', 'DATA_DIR', 'FORCE', 'USE_ZIG', 'ROM', 'BUNDLE_ROM', 'RECOMP_PYTHON', 'BASELINE_REPLAY', 'RENDERER_MANIFEST', 'JOBS', 'BUILD_TYPE', 'STORAGE', 'REPORT', 'RUN_SECONDS', 'SERIAL', 'ADB', 'ANDROID_SDK',
              'APK', 'PAGE_SIZE', 'ANDROID_BACKEND', 'ANDROID_DEBUGGABLE', 'ANDROID_RENDER_DRIVER', 'SMOKE_SECONDS')
     env = {k: v for k, v in os.environ.items() if k not in names}
     env.update(extra)
@@ -258,6 +258,25 @@ class RecipeCommandTests(unittest.TestCase):
             export, check = commands(MAC, 'recipe-export', '--analysis', 'local/recompile/symbols-1')
         self.assertEqual(export[2:], ['export', '--analysis', 'local/recompile/symbols-1'])
         self.assertEqual(check[2], 'check')
+
+
+class PackageCommandTests(unittest.TestCase):
+    def test_each_command_packages_its_target_with_the_shared_options(self):
+        for command, host, target in (('package-macos', MAC, 'macos'), ('package-linux', LINUX, 'linux'),
+                                      ('package-windows', LINUX, 'windows')):
+            with self.subTest(command=command), clean_env():
+                line = commands(host, command, '--jobs', '3', '--allow-dirty', '--docker')[0]
+                self.assertEqual(Path(line[1]).name, 'package.py')
+                self.assertEqual(line[2], target)
+                self.assertEqual(line[line.index('--jobs') + 1], '3')
+                self.assertIn('--allow-dirty', line)
+                self.assertIn('--docker', line)
+
+    def test_package_means_this_hosts_own_os(self):
+        with clean_env():
+            for host, target in ((MAC, 'macos'), (LINUX, 'linux'), (WINDOWS, 'windows')):
+                self.assertEqual(commands(host, 'package')[0][2], target)
+                self.assertNotIn('--allow-dirty', commands(host, 'package')[0])
 
 
 class SetupGameTests(unittest.TestCase):

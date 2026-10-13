@@ -67,7 +67,9 @@ def hooks(rom: bytes) -> str:
             'extern void sc64_ui_blit(uint8_t*, recomp_context*); sc64_ui_blit(rdram, ctx);'
             if kind is None else
             f'extern void sc64_ui_font(uint8_t*, recomp_context*, unsigned); sc64_ui_font(rdram, ctx, {kind});')
-        result += f'\n[[patches.hook]]\nfunc = {json.dumps(function)}\nbefore_vram = 0x{pc:08X}\ntext = {json.dumps(callback)}\n'
+        # A block, not bare statements: the hook can follow a label, and C before C23 (and GCC before 11)
+        # does not allow a declaration there.
+        result += f'\n[[patches.hook]]\nfunc = {json.dumps(function)}\nbefore_vram = 0x{pc:08X}\ntext = {json.dumps("{ " + callback + " }")}\n'
     return result
 
 def main() -> None:

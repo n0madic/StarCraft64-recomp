@@ -69,7 +69,7 @@ struct Logs {
 Toolchain choose_toolchain(const Options& options, const HostInfo& host, const Runner& run, const Logs& logs,
                            const fs::path& scratch, const Reporter& report) {
     if (options.compiler) {
-        auto found = probe(run, {"", *options.compiler, {}, "", {}}, host, scratch / "probe-given");
+        auto found = probe(run, {"", *options.compiler, {}, "", {}}, host, scratch / "probe-given", options.resources / "module");
         if (!found) throw SetupError("The compiler " + utf8(*options.compiler) + " cannot build the game module "
                                      "(a probe build failed). Use gcc or clang, or leave --compiler out.");
         return *found;
@@ -77,7 +77,8 @@ Toolchain choose_toolchain(const Options& options, const HostInfo& host, const R
     int number = 0;
     if (!options.use_zig)
         for (auto& candidate : system_candidates(host, options.cc_env))
-            if (auto found = probe(run, candidate, host, scratch / ("probe-" + std::to_string(number++)))) return *found;
+            if (auto found = probe(run, candidate, host, scratch / ("probe-" + std::to_string(number++)), options.resources / "module"))
+                return *found;
     if (!options.allow_download)
         throw SetupError("No usable C compiler was found (tried $CC, cc, clang, gcc) and downloads are disabled. Install gcc or clang.");
     report.info(options.use_zig ? "Using the pinned zig " + std::string(zig_version())
@@ -86,7 +87,7 @@ Toolchain choose_toolchain(const Options& options, const HostInfo& host, const R
     const auto version = run_capture(run, {zig, {"version"}, {}}, scratch / "zig-version.txt");
     if (version.empty()) throw SetupError("The downloaded zig does not run on this machine: " + utf8(zig));
     Toolchain toolchain = zig_toolchain(zig, host, version.substr(0, version.find_first_of("\r\n")), options.data_dir / "tools" / "zig-cache");
-    if (auto found = probe(run, toolchain, host, scratch / "probe-zig")) return *found;
+    if (auto found = probe(run, toolchain, host, scratch / "probe-zig", options.resources / "module")) return *found;
     throw SetupError("zig could not build the probe module; see " + utf8(scratch / "probe-zig" / "probe.log"));
 }
 

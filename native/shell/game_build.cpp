@@ -1,4 +1,5 @@
 #include "game_build.hpp"
+#include "locate.hpp"
 #include "log.hpp"
 #include "setup.hpp"
 #include <SDL3/SDL_filesystem.h>
@@ -15,10 +16,10 @@ fs::path base_dir() {
     const char* base = SDL_GetBasePath();
     return base ? fs::path(base) : fs::path();
 }
-fs::path resources_dir() { return base_dir() / "setup-resources"; }
+fs::path resources_dir() { return setup::first_directory(setup::resource_candidates(base_dir())); }
 fs::path recompiler_path() {
     if (const char* env = std::getenv("SC64_RECOMPILER"); env && *env) return fs::u8path(env);
-    return base_dir() / ("N64Recomp" + setup::host_info().exe_suffix);
+    return setup::first_file(setup::recompiler_candidates(base_dir(), setup::host_info()));
 }
 }
 
@@ -38,6 +39,7 @@ GameBuild::~GameBuild() {
 
 bool GameBuild::available() {
     std::error_code error;
+    if (resources_dir().empty() || recompiler_path().empty()) return false;
     return fs::is_regular_file(resources_dir() / "recipe" / "ntsc-u" / "generated.json", error) &&
            fs::is_regular_file(resources_dir() / "module" / "module_main.c", error) &&
            fs::is_regular_file(recompiler_path(), error);

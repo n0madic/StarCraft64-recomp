@@ -2161,3 +2161,67 @@ shell alone: zig download, build, then playing); modules from all three builds g
 and Windows download/unpack and system compilers are untested (D-060). Release packaging, signing and
 the Android flow remain. The module in `<storage>/game` is trusted as found (its hash is in the receipt
 but not checked at load).
+
+## ADR-088 — Release launcher packages contain no game code (ACCEPTED, publication pending)
+
+**Context:** With ADR-084..087 a package no longer needs anything derived from the game: the shell,
+`sc64_setup`, the prebuilt N64Recomp and the recipe are enough, and the user's ROM produces the game
+on the user's machine. Until now every package embedded the game (personal builds). Two facts
+constrain what may be released: the shell statically links N64ModernRuntime, which is licensed under
+GPL-3.0 (its `COPYING`), and the title-art icon is derived from the game (ADR-076).
+
+**Decision:** `tools/desktop/package.py` (`make package[-macos|-linux|-windows]`) builds the launcher
+with `-DSC64_BUILD_GAME_MODULE=OFF` (no generated code is needed or read), takes the N64Recomp of
+`local/dist/recompiler` only when its receipt shows the recipe hashes were reproduced, and stages an
+exact layout: macOS `StarCraft64.app` (executables in `Contents/MacOS`, resources in
+`Contents/Resources`, ad hoc signed seal), Linux and Windows folders with `setup-resources/`. The staged
+tree is audited against the layout byte for byte: no extra file, no symlink, no ROM magic, no
+`sc64-game.*`, no game-code suffix except the authored `module_main.c`. The icon is the neutral `SC64` mark
+of `tools/desktop/neutral_icon.py` (gold DejaVu Sans Mono Bold lettering on a deep-space blue plate, generated at packaging time,
+nothing from the game): `.icns` in the macOS bundle, embedded `.ico` in the Windows exe, `StarCraft64.png`
+beside the Linux binary. Archives are
+deterministic (sorted members, fixed modes, commit time, gzip header without name or clock). Builds
+map the source tree to `/sc64` so no user path is embedded. `tools/desktop/notices.py` copies every
+license text from the pinned sources (SDL, GPL-3.0, MIT and BSD components, the public-domain
+alternatives of miniaudio and stb), writes `NOTICE.txt` stating that the executables are distributed
+under the GPL because of N64ModernRuntime, and `SOURCE.txt` with the repository URL, the commit and the
+runtime and recompiler pins (GPL section 6). Packaging refuses a dirty tree unless `--allow-dirty` and
+warns when the commit is not on a remote branch.
+
+**Consequences:** Verified on macOS arm64: the zip (3.9 MB) passes `codesign --verify --deep --strict`,
+contains no build path, and, extracted anywhere, starts the game from a ROM with an empty storage folder
+(Apple clang build, then play); the same for `sc64_setup` inside the bundle. Linux tar.gz: extracted in a
+compiler-free Debian amd64 container, the first start downloads zig, builds and plays (8746 fields). The
+Windows zip is built and audited but not run (D-061). Open decisions for the owner before publishing:
+(1) the GPL-3.0 obligations above apply to any redistributed executable, so the corresponding source
+must stay reachable at the commit named in `SOURCE.txt` (push it) and the README statement that
+original code is MIT does not describe the binaries; (2) macOS builds are not notarized (Gatekeeper
+needs a user override) and Windows ones are not code-signed; (3) the icon is a placeholder mark and can be replaced by a drawn one.
+Personal builds (`make build`) are unchanged and still must not be shared.
+
+**Amendment to ADR-087 (2026-10-13):** compiling the game with clang printed `-Wc23-extensions` warnings
+("label followed by a declaration"): the recompiler pastes each hook after a label, and the hooks began
+with an `extern` declaration. Compilers before C23, and GCC before 11, reject a declaration after a
+label, so the system-compiler path could have failed outright on such a machine (not tested here; the
+probe build does not contain the construct). The hooks are now blocks (`{ extern ...; call(...); }`) in
+`prepare.py` and `add_ui_hooks.py`, the recipe was regenerated and its hashes were reproduced by the
+macOS, Linux (amd64 container) and Windows (Wine) N64Recomp builds. Result: no warning in any generated
+file under clang, an empty compile log in `sc64_setup`, and 31 traced frames identical to the previous
+build.
+
+The probe build had not exercised that construct. It now compiles what the module is made of: `recomp.h`
+(so the compiler's own `RECOMP_FUNC` attributes, GCC's `noipa` among them), a function in the shape of the
+recompiler's output (label followed by a hook block, gotos, a jump-table `switch` with `switch_error`, the
+memory/float/function-lookup macros), a section table with designated initializers and `nullptr`, and the
+host functions it calls, then links a shared object (`toolchain.cpp`, `probe_source(true)`). A compiler that
+cannot build this is rejected before any code is generated; without `recomp.h` beside the module sources a
+smaller subset is used. Checked: Apple clang, Homebrew clang 23, zig's clang 21, GCC 14 (Linux cross image)
+and mingw-w64 GCC 16 accept it; the old bare hook form is rejected by clang with `-Werror=c23-extensions`
+and accepted with default flags, which is why the compile log had shown only warnings. Its first version
+failed everywhere because it lacked the host-function definitions (the link step); that is how its link check
+was shown to work. A Python test ties the probe's hook form to the recipe's hooks.
+
+**Optimization level (2026-10-13):** the module stays at `-O2`. A 30 s sampled comparison of `-O2` and
+`-O3` in the first mission found guest code at 1.4% of one core for both and a difference (+1.9%) below the
+run-to-run spread (docs/performance.md). `-ffp-contract=off` and `-fno-strict-aliasing` are required for
+correctness, not speed.

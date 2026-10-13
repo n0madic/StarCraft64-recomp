@@ -72,6 +72,30 @@ class BuildFlagTests(unittest.TestCase):
         self.assertIn('"-I" + sources.module_dir', (ROOT / 'native/setup/toolchain.cpp').read_text())
 
 
+class ProbeTests(unittest.TestCase):
+    """The compiler probe must build the shapes the recompiler emits, so a compiler that cannot is rejected up front."""
+    def test_the_probe_contains_the_hook_blocks_of_the_recipe(self):
+        probe = (ROOT / 'native/setup/toolchain.cpp').read_text()
+        recipe = (ROOT / 'recipe/ntsc-u/sc64.toml').read_text()
+        hooks = re.findall(r'text = "(\{ extern void [^"]+\})"', recipe)
+        self.assertGreater(len(hooks), 20)
+        # Every hook is a block (valid after a label in any C version); the probe has one of the same form.
+        self.assertEqual(len(re.findall(r'^text = ', recipe, re.M)), len(hooks))
+        self.assertIn('{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }', hooks)
+        self.assertIn('{ extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }', probe)
+        self.assertRegex(probe, r'L_80000420:\n    \{ extern')
+
+    def test_the_probe_uses_the_macros_of_the_pinned_recomp_header(self):
+        header = (ROOT / 'local/deps/N64ModernRuntime/N64Recomp/include/recomp.h')
+        if not header.is_file():
+            self.skipTest('needs the prepared runtime')
+        text = header.read_text()
+        probe = (ROOT / 'native/setup/toolchain.cpp').read_text()
+        for macro in ('RECOMP_FUNC', 'S32', 'ADD32', 'MEM_W', 'CVT_S_W', 'LOOKUP_FUNC'):
+            self.assertRegex(text, rf'define {macro}\b')
+            self.assertIn(macro, probe)
+
+
 class SourcesTests(unittest.TestCase):
     def test_module_is_plain_c_without_runtime_headers(self):
         source = (MODULE / 'module_main.c').read_text()

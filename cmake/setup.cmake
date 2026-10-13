@@ -1,5 +1,5 @@
 # sc64_setup: ROM -> game module on the user's machine (ADR-087). Needs sc64_sha and SDL3 from shell.cmake.
-set(SC64_SETUP_SOURCES process.cpp recipe.cpp toolchain.cpp zig.cpp setup.cpp)
+set(SC64_SETUP_SOURCES process.cpp recipe.cpp toolchain.cpp zig.cpp setup.cpp locate.cpp)
 list(TRANSFORM SC64_SETUP_SOURCES PREPEND "${SC64_ROOT}/native/setup/")
 add_library(sc64_setup_lib STATIC ${SC64_SETUP_SOURCES})
 target_include_directories(sc64_setup_lib PUBLIC "${SC64_ROOT}/native/setup" "${SC64_ROOT}/native/runtime"

@@ -50,7 +50,8 @@ SYMBOL_LINES = [re.compile(pattern) for pattern in (
     rf"size = {HEX}", r"functions = \[", r"\]",
     rf'  \{{ name = "{IDENT}", vram = {HEX}, size = {HEX} \}},')]
 # Hook text is authored C that calls a host callback; it never carries data.
-HOOK_TEXT = rf'text = "extern void sc64_[a-z_0-9]+\(uint8_t\*(?:, recomp_context\*)?(?:, unsigned)?\); sc64_[a-z_0-9]+\(rdram(?:, ctx)?(?:, [0-9]+)?\);"'
+HOOK_TEXT = (r'text = "\{ extern void sc64_[a-z_0-9]+\(uint8_t\*(?:, recomp_context\*)?(?:, unsigned)?\); '
+             r'sc64_[a-z_0-9]+\(rdram(?:, ctx)?(?:, [0-9]+)?\); \}"')
 CONFIG_LINES = [re.compile(pattern) for pattern in (
     r"", r"\[input\]", r"\[patches\]", r"\[\[patches\.instruction\]\]", r"\[\[patches\.hook\]\]",
     rf"entrypoint = {HEX}", rf'symbols_file_path = "{SYMBOLS}"', rf'rom_file_path = "{ROM_PLACEHOLDER}"',
