@@ -97,8 +97,8 @@ void Session::launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::p
     // save image may be malformed; failing here leaves no audio device open.
     runtime::flash_device().initialize(storage / "sc64.fla");
     if (persist) {
-        // Picker imports survive cold starts. APK assets already have persistent
-        // storage, so that path never creates a second ROM file.
+        // Picker imports survive cold starts. Packaged ROMs (APK assets, AppImage)
+        // already have persistent storage, so that path never creates a second ROM file.
         const auto temporary = storage / ".sc64-rom.tmp";
         std::ofstream output(temporary, std::ios::binary);
         output.exceptions(std::ios::failbit | std::ios::badbit);

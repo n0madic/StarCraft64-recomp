@@ -44,6 +44,7 @@ pins remain only in Git history. The SDL3 shell uses these pinned public inputs,
 | stb_truetype at commit `2c980bb59875b0d32144a71867fbdebb2f77cd20` | [stb_truetype.h](https://raw.githubusercontent.com/nothings/stb/2c980bb59875b0d32144a71867fbdebb2f77cd20/stb_truetype.h) | `ecd30b05e0dd4fea3a13c26810dd9e1992dc379049482c393d5a19e6b5090aab` |
 | DejaVu fonts 2.37 (Bitstream Vera derived license) | [dejavu-fonts-ttf-2.37.zip](https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.zip) | `7576310b219e04159d35ff61dd4a4ec4cdba4f35c00e002a136f00e96a908b0a` |
 | miniaudio 0.11.23 | [Pinned single header](https://raw.githubusercontent.com/mackron/miniaudio/0.11.23/miniaudio.h) | `7e4f3f13c8fe66df2080ac3dd12a89193e3c2463cb7f067c798abd7331cd8ee6` |
+| AppImage type2 runtime 20251108 (x86_64) | [runtime-x86_64](https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64) | `2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d` |
 | Debian trixie-slim base image (linux/arm64) for the Linux cross image | `debian@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f` | digest-pinned in `tools/desktop/linux-cross.Dockerfile` |
 
 The overlay uses `DejaVuSansMono-Bold.ttf` from the font archive; its LICENSE

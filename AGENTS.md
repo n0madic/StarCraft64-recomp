@@ -130,6 +130,7 @@ make test-native                     # private desktop configure/build + CTest
 make test                            # both suites
 make build-windows                   # local/dist/StarCraft64-windows.zip
 make build-linux                     # local/dist/StarCraft64-linux.tar.gz
+make build-appimage                  # local/dist/StarCraft64-x86_64.AppImage
 make build-android                   # local/dist/StarCraft64-android.apk
 make check-apk
 make devices
@@ -137,6 +138,8 @@ make install-android SERIAL=DEVICE_SERIAL
 make run-android SERIAL=DEVICE_SERIAL
 ```
 
+The Linux AppImage takes `BUNDLE_ROM=1 ROM=...` the same way and then writes the
+distinct `StarCraft64-x86_64-bundled-rom.AppImage` (personal use, ADR-081).
 For personal ROM bundling, use
 `make build-android BUNDLE_ROM=1 ROM="/path/to/your.z64"`. Also pass
 `BUNDLE_ROM=1` to APK audit/install/smoke targets for that artifact. Select an

@@ -2,7 +2,6 @@
 // storage, bundled ROM assets and the vibrator helper class.
 #include "../shell/platform.hpp"
 #include "../shell/log.hpp"
-#include "../runtime/rom_image.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_system.h>
 #include <jni.h>
@@ -65,18 +64,5 @@ void sc64_platform_vibrate(int milliseconds, int amplitude) {
 
 // APK assets are read straight into owned memory: no extra on-disk ROM copy.
 std::vector<std::uint8_t> sc64_read_bundled_rom() {
-    SDL_IOStream* asset = SDL_IOFromFile("sc64/sc64-ntsc-u.z64", "rb");
-    if (!asset) throw std::runtime_error("This APK does not contain a bundled ROM");
-    std::vector<std::uint8_t> rom(sc64::runtime::rom_size);
-    std::size_t total = 0;
-    while (total < rom.size()) {
-        const std::size_t read = SDL_ReadIO(asset, rom.data() + total, std::min<std::size_t>(rom.size() - total, 1 << 16));
-        if (read == 0) break;
-        total += read;
-    }
-    std::uint8_t extra = 0;
-    const bool longer = SDL_ReadIO(asset, &extra, 1) == 1;
-    SDL_CloseIO(asset);
-    if (total != rom.size() || longer) throw std::runtime_error("Bundled ROM asset is not a 32 MiB dump");
-    return rom;
+    return sc64_read_packaged_rom("sc64/sc64-ntsc-u.z64");
 }

@@ -14,7 +14,7 @@ name and are not reused for the shell.
 |---|---|---|
 | macOS arm64 | native, Homebrew LLVM | Gates below pass |
 | Windows x86_64 | cross, Homebrew mingw-w64 GCC, static | Builds; menu, audio under Wine 11.17; user acceptance D-054 |
-| Linux x86_64 | cross, local Docker image (`tools/desktop/linux-cross.Dockerfile`) | Builds; user acceptance D-054 |
+| Linux x86_64 | cross, local Docker image (`tools/desktop/linux-cross.Dockerfile`); tar.gz and AppImage (ADR-081) | Builds; user acceptance D-054 |
 
 Android uses the same shell; see [android.md](android.md).
 
@@ -70,6 +70,7 @@ make bootstrap        # SDL3, stb_truetype, DejaVu fonts, miniaudio (pinned, has
 make build            # local/dist/StarCraft64.app
 make build-windows    # local/dist/StarCraft64-windows.zip
 make build-linux      # local/dist/StarCraft64-linux.tar.gz
+make build-appimage   # local/dist/StarCraft64-x86_64.AppImage (runs build-linux first)
 make test
 ```
 
@@ -87,6 +88,29 @@ resource, Linux `StarCraft64.png` beside the binary) and skip it when absent.
 New bundles/packages are staged completely before publication; a running
 executable is not truncated. Receipts: `local/reports/desktop/build.json`
 (schema 2), `local/reports/{windows,linux}/build.json` (schema 1).
+
+### Linux AppImage
+
+`make build-appimage` wraps the audited Linux package (checked against
+`local/reports/linux/build.json`) into a single `local/dist/StarCraft64-x86_64.AppImage`
+and writes `local/reports/appimage/<name>.json` (schema 1). `tools/desktop/appimage.py`
+lays out AppDir (`AppRun`, `.desktop`, icon, `usr/bin/{StarCraft64,font,license}`),
+builds the zstd squashfs with `mksquashfs` in the local cross image and joins it with
+the pinned type2 runtime (`make bootstrap`). It then unpacks the finished file and
+audits it again. Nothing is built or uploaded remotely. The executable keeps SDL
+statically linked and opens X11/Wayland/audio libraries at run time, so the host needs
+only glibc (see ADR-081 for the measured minimum) and FUSE (or run with
+`--appimage-extract-and-run`). The ROM is not included; saves go to
+`~/.local/share/StarCraft64` as for the tar.gz.
+
+`make build-appimage BUNDLE_ROM=1 ROM="/path/your.z64"` packs the normalized,
+SHA-1-verified ROM as `usr/bin/sc64-ntsc-u.z64` and writes
+`StarCraft64-x86_64-bundled-rom.AppImage`, a different file name so the personal
+artifact cannot be mistaken for the ROM-free one. `AppRun` then starts the app with
+`--config=sc64.bundled_rom=1`; the shell reads the ROM from the read-only image into
+owned memory and creates no second copy. Such an image is strictly personal; never
+share or upload it. The embedded runtime statically links libfuse (LGPL), which
+matters only if an image were ever distributed.
 
 ## Launch and controls
 

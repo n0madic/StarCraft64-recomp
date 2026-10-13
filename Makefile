@@ -37,7 +37,7 @@ export ROM BUNDLE_ROM SERIAL ANDROID_SDK APK STORAGE REPORT RUN_SECONDS SMOKE_SE
 export BASELINE_REPLAY RENDERER_MANIFEST
 export PAGE_SIZE ANDROID_BACKEND ANDROID_DEBUGGABLE BUILD_TYPE
 
-.PHONY: help bootstrap recompile build build-desktop configure-desktop run run-desktop build-windows build-linux \
+.PHONY: help bootstrap recompile build build-desktop configure-desktop run run-desktop build-windows build-linux build-appimage \
         build-android build-android-opengles icon configure-android check-apk devices install-android \
         run-android smoke-android audio-android benchmark-renderer test test-python test-native
 
@@ -48,6 +48,8 @@ help:
 	  'make run / run-desktop       Launch it; ROM="/path/game.z64" is optional' \
 	  'make build-windows          Cross-build the Windows x86_64 zip (mingw-w64)' \
 	  'make build-linux            Cross-build the Linux x86_64 tar.gz (local Docker)' \
+	  'make build-appimage         Pack the Linux x86_64 AppImage from the fresh Linux build (local Docker)' \
+	  '  BUNDLE_ROM=1 ROM="/path/game.z64" packs the ROM and autostarts from it (personal use only)' \
 	  'make build-android          Build and audit the personal arm64 APK locally' \
 	  '  BUNDLE_ROM=1 ROM="/path/game.z64" includes ROM and autostarts from APK assets' \
 	  'BUILD_TYPE=Release|RelWithDebInfo|Debug   CMake build type of app builds (default Release)' \
@@ -105,6 +107,12 @@ build-windows:
 
 build-linux:
 	$(PYTHON) tools/desktop/cross_build.py linux --jobs "$$JOBS" --build-type "$$BUILD_TYPE"
+
+build-appimage: build-linux
+	@set --; if [ "$$BUNDLE_ROM" = 1 ]; then \
+	  test -n "$$ROM" || { printf '%s\n' 'Set ROM to your dump when BUNDLE_ROM=1.' >&2; exit 2; }; \
+	  set -- --bundle-rom "$$ROM"; fi; \
+	$(PYTHON) tools/desktop/appimage.py "$$@"
 
 build-android:
 	@set --; if [ -n "$$ANDROID_SDK" ]; then set -- --sdk "$$ANDROID_SDK"; fi; \

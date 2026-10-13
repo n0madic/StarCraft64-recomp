@@ -17,6 +17,9 @@ std::string sc64_storage_path();
 void sc64_platform_initialize(const std::string& storage);
 void sc64_platform_finalize();
 Sc64RomSelection sc64_poll_rom();
+// Reads a packaged 32 MiB ROM (an Android asset or a file beside the executable)
+// into owned memory; throws when it is missing or not exactly that size.
+std::vector<std::uint8_t> sc64_read_packaged_rom(const std::string& path);
 std::vector<std::uint8_t> sc64_read_bundled_rom();
 // Vibrate for milliseconds at amplitude 1..255; milliseconds <= 0 stops.
 // Hosts without a vibrator ignore it.

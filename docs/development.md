@@ -28,6 +28,7 @@ make test
 
 make build-windows               # local/dist/StarCraft64-windows.zip
 make build-linux                 # local/dist/StarCraft64-linux.tar.gz
+make build-appimage              # local/dist/StarCraft64-x86_64.AppImage
 
 make build-android
 make check-apk

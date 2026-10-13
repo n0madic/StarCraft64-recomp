@@ -7,6 +7,7 @@
 #include "log.hpp"
 #include "../runtime/rom_image.hpp"
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <stdexcept>
@@ -146,6 +147,23 @@ bool sc64_update_mouse_cursor(bool requested, const Sc64CursorRegion& region,
     return cursor_hidden;
 }
 
+std::vector<std::uint8_t> sc64_read_packaged_rom(const std::string& path) {
+    SDL_IOStream* stream = SDL_IOFromFile(path.c_str(), "rb");
+    if (!stream) throw std::runtime_error("Packaged ROM unavailable (" + path + "): " + SDL_GetError());
+    std::vector<std::uint8_t> rom(sc64::runtime::rom_size);
+    std::size_t total = 0;
+    while (total < rom.size()) {
+        const std::size_t read = SDL_ReadIO(stream, rom.data() + total, std::min<std::size_t>(rom.size() - total, 1 << 16));
+        if (read == 0) break;
+        total += read;
+    }
+    std::uint8_t extra = 0;
+    const bool longer = SDL_ReadIO(stream, &extra, 1) == 1;
+    SDL_CloseIO(stream);
+    if (total != rom.size() || longer) throw std::runtime_error("Packaged ROM is not a 32 MiB dump: " + path);
+    return rom;
+}
+
 #if !defined(__ANDROID__)
 std::string sc64_storage_path() {
     char* path = SDL_GetPrefPath("", "StarCraft64");
@@ -157,7 +175,9 @@ std::string sc64_storage_path() {
 }
 // Desktop profiles have no vibrator; gamepad rumble is not mapped.
 void sc64_platform_vibrate(int, int) {}
+// A packaged build (AppImage) places the verified ROM beside the executable.
 std::vector<std::uint8_t> sc64_read_bundled_rom() {
-    throw std::runtime_error("Bundled-ROM loading is available in Android APK builds");
+    const char* base = SDL_GetBasePath();
+    return sc64_read_packaged_rom(std::string(base ? base : "") + "sc64-ntsc-u.z64");
 }
 #endif

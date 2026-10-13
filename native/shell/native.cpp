@@ -420,7 +420,7 @@ std::optional<std::string> Native::load_bundled_rom() {
     try {
         session().load_bundled(sc64_read_bundled_rom(), storage_);
         reset_feedback();
-        log::info("SC64 ROM loaded from APK assets; no private ROM copy");
+        log::info("SC64 ROM loaded from the packaged build; no private ROM copy");
         return std::nullopt;
     } catch (const std::exception& error) { return std::string(error.what()); }
 }

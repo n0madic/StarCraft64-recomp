@@ -20,7 +20,7 @@ audio and input.
 |---|---|
 | macOS (Apple Silicon) | Built and accepted by the author |
 | Android (arm64-v8a, Android 9 / API 28+) | Accepted on one physical phone and on emulators; wider device and performance testing has not been done |
-| Windows x86_64, Linux x86_64 | Cross-built (Windows menu and audio checked under Wine); not yet tried by a user |
+| Windows x86_64, Linux x86_64 (tar.gz, AppImage) | Cross-built (Windows menu and audio checked under Wine); not yet tried by a user |
 
 What works: the single-player campaign, original menus and the Encyclopedia, save
 and load, sound, mouse/touch play (the game still sees a normal N64 controller).
@@ -81,12 +81,18 @@ into the app's private storage and reused on later launches.
 ```sh
 make build-windows                  # local/dist/StarCraft64-windows.zip
 make build-linux                    # local/dist/StarCraft64-linux.tar.gz
+make build-appimage                 # local/dist/StarCraft64-x86_64.AppImage (builds Linux first)
 
 make build-android                  # local/dist/StarCraft64-android.apk
 make devices                        # find your device serial
 make install-android SERIAL=DEVICE_SERIAL
 make run-android SERIAL=DEVICE_SERIAL
 ```
+
+The Linux AppImage needs glibc 2.38 or newer (Debian 13, Ubuntu 24.04+) and FUSE.
+Add `BUNDLE_ROM=1 ROM="/path/to/your.z64"` to `make build-appimage` to pack the ROM
+and start straight into the game (`StarCraft64-x86_64-bundled-rom.AppImage`); like the
+bundled APK it is strictly personal.
 
 On Android, tap the start screen to choose your ROM through the system picker.
 To skip the picker, build with `BUNDLE_ROM=1 ROM="/path/to/your.z64"`; the ROM is
@@ -167,7 +173,7 @@ All other names are the property of their respective owners.
   supply a cartridge image dumped from a copy you legally own; the runtime accepts
   only the NTSC-U image with the expected SHA-1.
 - **Builds are personal.** Recompiled game code and any build that contains it
-  (including an APK with the ROM bundled) are for the owner's private use only and
+  (including an APK or AppImage with the ROM bundled) are for the owner's private use only and
   must not be shared or uploaded.
 - **Licensing.** Original source and documentation are MIT-licensed ([LICENSE](LICENSE)).
   The licence grants no rights to the game, its ROM, assets or trademarks.

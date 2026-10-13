@@ -52,7 +52,7 @@ performance/thermal runs are deferred by the requested scope.
 Those Stage 3–5 results were recorded on the former engine build. The SDL3
 shell (ADR-074) reproduces the desktop pixel, lifecycle and recipe gates, the
 16 KiB emulator Android profile (OpenGL ES variant; Vulkan is the packaged default and crashes on the emulator, D-053), and cross-builds
-Windows and Linux x86_64 packages whose user acceptance is pending (D-054); see
+Windows and Linux x86_64 packages (Linux also as an AppImage, ADR-081) whose user acceptance is pending (D-054); see
 [desktop](desktop.md) and [Android](android.md).
 
 **Stage 6 was withdrawn by the user on 2026-10-09 (ADR-060).** Original fonts

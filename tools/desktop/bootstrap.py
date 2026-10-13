@@ -26,6 +26,10 @@ STB_COMMIT = '2c980bb59875b0d32144a71867fbdebb2f77cd20'
 FONT_ARCHIVE = TOOLCHAINS / 'dejavu/dejavu-fonts-ttf-2.37.zip'
 FONT = TOOLCHAINS / 'dejavu/DejaVuSansMono-Bold.ttf'
 FONT_LICENSE = TOOLCHAINS / 'dejavu/LICENSE'
+APPIMAGE_RUNTIME_TAG = '20251108'
+APPIMAGE_RUNTIME = TOOLCHAINS / f'appimage/runtime-x86_64-{APPIMAGE_RUNTIME_TAG}'
+APPIMAGE_RUNTIME_URL = f'https://github.com/AppImage/type2-runtime/releases/download/{APPIMAGE_RUNTIME_TAG}/runtime-x86_64'
+APPIMAGE_RUNTIME_SHA256 = '2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d'
 FILES = (
     (SDL_ARCHIVE, f'https://github.com/libsdl-org/SDL/releases/download/release-{SDL_VERSION}/SDL3-{SDL_VERSION}.tar.gz',
      '9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3'),
@@ -37,6 +41,7 @@ FILES = (
      '7576310b219e04159d35ff61dd4a4ec4cdba4f35c00e002a136f00e96a908b0a'),
     (MINIAUDIO, f'https://raw.githubusercontent.com/mackron/miniaudio/{MINIAUDIO_VERSION}/miniaudio.h',
      '7e4f3f13c8fe66df2080ac3dd12a89193e3c2463cb7f067c798abd7331cd8ee6'),
+    (APPIMAGE_RUNTIME, APPIMAGE_RUNTIME_URL, APPIMAGE_RUNTIME_SHA256),
 )
 
 def digest(path: Path) -> str:

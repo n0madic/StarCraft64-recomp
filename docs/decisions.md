@@ -1931,3 +1931,39 @@ baseline binaries.
 reconfigures and rebuilds the existing tree. Release was compiled and the 18
 desktop CTest cases passed on macOS; Windows, Linux and Android Release builds
 were not rebuilt here.
+
+## ADR-081 — Linux x86_64 AppImage with an optional packaged ROM (ACCEPTED)
+
+**Context:** The Linux tar.gz needs manual launcher setup. Flatpak needs a
+Flatpak runtime and `flatpak-builder` (bwrap) that do not cross-build cleanly on
+the arm64 macOS host and mainly serve Flathub, which cannot host a port built from
+the user's ROM. Snap needs LXD/Multipass on Linux; `snapcraft remote-build` and the
+Store build farm are remote builds and are forbidden for game-derived code. The
+shell already links SDL statically and opens windowing/audio libraries at run time,
+so only glibc is required from the host.
+
+**Decision:** `tools/desktop/appimage.py` (`make build-appimage`) wraps the staged
+Linux package, after verifying it against `local/reports/linux/build.json` and the
+x86_64 ELF header, into `local/dist/StarCraft64-x86_64.AppImage`. AppDir holds
+`AppRun`, a `.desktop` entry, the icon and `usr/bin/{StarCraft64, font, license}`.
+The squashfs (zstd) is built with `mksquashfs` in the existing local cross image
+and joined with the type2 runtime pinned by tag and SHA-256 in `bootstrap.py`, as
+`appimagetool` does; nothing runs remotely. The finished file is unpacked and
+audited again. `BUNDLE_ROM=1 ROM=...` adds the normalized, SHA-1-verified ROM as
+`usr/bin/sc64-ntsc-u.z64` and writes a differently named
+`StarCraft64-x86_64-bundled-rom.AppImage`. `AppRun` adds
+`--config=sc64.bundled_rom=1` only when that file exists; the shell reads it via the
+shared `sc64_read_packaged_rom` (also used by Android) into owned memory without a
+second ROM copy. All members are normalized to 0644/0755 because the image is
+root-owned.
+
+**Consequences:** The binary is built on Debian trixie, whose newest required glibc
+symbol is `GLIBC_2.38`: Debian 13, Ubuntu 24.04+, Fedora and Arch run it; Ubuntu 22.04
+(glibc 2.35) does not. A lower floor needs an older base image and a re-check of
+SDL and the toolchain. Hosts need FUSE or `--appimage-extract-and-run`. Verified here: the
+audited unit tests, the packed file system listing, and a run of the unpacked bundled
+AppDir under linux/amd64 emulation (dummy SDL video/audio, root): it loaded the ROM
+from the package, reached the main menu and wrote only the save to storage.
+The AppImage file itself cannot run under QEMU binfmt (its ELF header carries the
+`AI` marker), and no real Linux desktop run exists (D-054). Flatpak and Snap are
+not provided.
