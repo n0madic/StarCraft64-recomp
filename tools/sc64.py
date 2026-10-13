@@ -45,6 +45,7 @@ RENDERER_BUILD = ROOT / 'local/build/renderer'
 INVENTORY = ROOT / 'local/reports/libultra-resident/inventory.json'
 RECOMPILER_TARGETS = ('macos-arm64', 'linux-x86_64', 'windows-x86_64')  # tools/recompile/build_recompiler.py
 EMULATOR = ROOT / 'local/toolchains/ares-build/test-runner/ares-test'
+MODULE_TARGETS = ('android-arm64',)  # native/setup/toolchain.cpp target_names()
 RENDER_DRIVERS = ('vulkan', 'opengles2')  # tools/android/build.py RENDER_DRIVERS
 EMULATOR_DRIVER_LINE = re.compile(rb'^sc64\.render_driver = opengles2$', re.MULTILINE)
 ACTIVITY = adb_client.PACKAGE + '/com.nomadic.sc64.Sc64Activity'
@@ -131,6 +132,16 @@ def package_commands(target: str | None):
     return commands
 
 
+def module_ndk(host: Host, args: argparse.Namespace) -> Path | None:
+    """NDK for `setup-game --module-target android-arm64`: --ndk, else the one the APK build pins, else
+    whatever sc64_setup finds itself ($ANDROID_NDK_ROOT, the SDK's ndk folder)."""
+    if args.ndk:
+        return args.ndk
+    sdk = args.sdk or hostenv.android_sdk(host)
+    pinned = sdk / 'ndk' / pins.SDK_REVISION if sdk else None
+    return pinned if pinned and pinned.is_dir() else None
+
+
 def setup_game_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     """Run sc64_setup (ROM -> game module, ADR-087) from its own game-code-free build tree with this host's recompiler."""
     rom = require_rom(args.rom, 'setup-game')
@@ -140,10 +151,11 @@ def setup_game_commands(host: Host, args: argparse.Namespace) -> list[Command]:
     if not recompiler.is_file():
         raise UsageError(f'{recompiler} not found: run `python tools/sc64.py build-recompiler` first')
     data = ['--data', str(args.data_dir)] if args.data_dir else []
+    cross = ['--target', args.module_target, *(['--ndk', str(ndk)] if (ndk := module_ndk(host, args)) else [])] if args.module_target else []
     return [script('desktop/build.py', '--build-type', args.build_type, '--setup-only', '--configure-only'),
             ['cmake', '--build', str(build), '--target', 'sc64_setup', '-j', str(args.jobs)],
             [str(build / ('sc64_setup' + host.exe_suffix)), '--rom', str(rom), '--recompiler', str(recompiler),
-             '--resources', str(build / 'setup-resources'), '--jobs', str(args.jobs), *data,
+             '--resources', str(build / 'setup-resources'), '--jobs', str(args.jobs), *data, *cross,
              *(['--use-zig'] if args.use_zig else []), *(['--force'] if args.force else [])]]
 
 
@@ -361,6 +373,10 @@ def parser() -> argparse.ArgumentParser:
                          help='build-recompiler/verify-recompiler: release target (default: this host; $RECOMPILER_TARGET)')
     options.add_argument('--data-dir', type=Path, default=Path(os.environ['DATA_DIR']) if os.environ.get('DATA_DIR') else None,
                          help='setup-game: where the game module goes (default: the game\'s storage folder; $DATA_DIR)')
+    options.add_argument('--module-target', choices=MODULE_TARGETS, default=os.environ.get('MODULE_TARGET') or None,
+                         help='setup-game: cross-build the module for this platform instead of the host ($MODULE_TARGET)')
+    options.add_argument('--ndk', type=Path, default=Path(os.environ['NDK']) if os.environ.get('NDK') else None,
+                         help='setup-game --module-target android-arm64: Android NDK root (default: the pinned one in the SDK; $NDK)')
     options.add_argument('--use-zig', action='store_true', default=env_flag('USE_ZIG'),
                          help='setup-game: build with the pinned zig instead of a system compiler ($USE_ZIG=1)')
     options.add_argument('--force', action='store_true', default=env_flag('FORCE'),
@@ -409,7 +425,7 @@ def parser() -> argparse.ArgumentParser:
     add('package-linux', 'Linux x86_64 launcher tar.gz (host compiler on Linux x86_64, else Docker)', package_commands('linux'))
     add('package-windows', 'Windows x86_64 launcher zip (mingw-w64)', package_commands('windows'))
     add('setup-game', 'build the game module from --rom the way a user of the application does (ADR-087)',
-        setup_game_commands)
+        setup_game_commands, android)
     add('build-recompiler', 'build the patched N64Recomp release binary into local/dist/recompiler (ADR-085)',
         build_recompiler_commands)
     add('verify-recompiler', 'run that binary on the recipe and compare every generated hash', verify_recompiler_commands)

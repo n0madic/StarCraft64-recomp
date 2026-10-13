@@ -16,7 +16,10 @@ using namespace sc64::setup;
 void usage() {
     std::puts("usage: sc64_setup --rom PATH [--data DIR] [--resources DIR] [--recompiler PATH]\n"
               "                  [--compiler PATH | --use-zig] [--jobs N] [--force] [--keep-work] [--no-download]\n"
-              "Builds sc64-game from your NTSC-U ROM into DIR/game (default: the game's storage folder).");
+              "                  [--target android-arm64 [--ndk PATH]]\n"
+              "Builds sc64-game from your NTSC-U ROM into DIR/game (default: the game's storage folder).\n"
+              "--target builds the module for another platform into DIR/game-<target> with the Android NDK\n"
+              "(--ndk, $ANDROID_NDK_ROOT or the Android SDK's ndk folder); it is for that device, not run here.");
 }
 
 fs::path default_data_dir() {
@@ -56,6 +59,8 @@ int main(int argc, char** argv) {
             else if (option == "--keep-work") options.keep_work = true;
             else if (option == "--no-download") options.allow_download = false;
             else if (option == "--use-zig") options.use_zig = true;
+            else if (option == "--target") options.target = parse_target(value());
+            else if (option == "--ndk") options.ndk = path_from_utf8(value());
             else if (option == "--help" || option == "-h") { usage(); return 0; }
             else throw SetupError("Unknown option " + std::string(option));
         }
@@ -70,11 +75,19 @@ int main(int argc, char** argv) {
             else options.recompiler = first_file(recompiler_candidates(here, host_info()));
             if (options.recompiler.empty()) options.recompiler = here / ("N64Recomp" + host_info().exe_suffix);
         }
+        if (options.target && options.target->os == "android" && !options.ndk) {
+            const auto candidates = ndk_candidates(host_info(), [](const char* name) {
+                const char* value = std::getenv(name);
+                return std::string(value ? value : "");
+            });
+            if (!candidates.empty()) options.ndk = candidates.front();
+        }
         Reporter report;
         report.step = [](int step, int total, const std::string& text) { std::printf("[%d/%d] %s\n", step, total, text.c_str()); std::fflush(stdout); };
         report.info = [](const std::string& text) { std::printf("      %s\n", text.c_str()); std::fflush(stdout); };
         const Result result = run_setup(options, run_process, report);
-        std::printf("%s: %s\n", result.rebuilt ? "Built" : "Ready", path_utf8(result.module).c_str());
+        std::printf("%s%s: %s\n", result.rebuilt ? "Built" : "Ready", options.target ? (" for " + platform_name(*options.target)).c_str() : "",
+                    path_utf8(result.module).c_str());
         return 0;
     } catch (const SetupError& error) {
         std::fprintf(stderr, "sc64_setup: %s\n", error.what());

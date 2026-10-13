@@ -174,6 +174,19 @@ it downloads zig 0.16.0 (about 50-100 MB, pinned SHA-256) into `<storage>/tools`
 system `curl` and `tar` (`--no-download` forbids that). Logs of every run are kept in
 `<storage>/setup/logs/`. Nothing else is installed and no game code leaves the machine.
 
+### Module for an Android phone (ADR-089)
+
+`sc64_setup --target android-arm64` builds the same game for arm64 Android with the Android NDK
+(`--ndk PATH`, `$ANDROID_NDK_ROOT` or the SDK's `ndk/` folder; zig cannot build for Android):
+
+```sh
+make setup-game ROM="/path/to/your.z64" MODULE_TARGET=android-arm64 [NDK=...] [DATA_DIR=...]
+```
+
+The result is `<storage>/game-android-arm64/sc64-game.so` with its own `receipt.json` (`"target"`), and
+the host module is not touched. It is private like any other module and must not be published. A phone
+loads it only from the app's internal files directory (D-062 lists what is still open).
+
 ## Launch and controls
 
 ```sh

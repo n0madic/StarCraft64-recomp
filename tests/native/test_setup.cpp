@@ -122,7 +122,7 @@ void test_process() {
 
 // ---- locations ----
 void test_locate() {
-    const HostInfo linux{"linux", "x86_64", ".so", ""}, windows{"windows", "x86_64", ".dll", ".exe"};
+    const Platform linux{"linux", "x86_64", ".so", ""}, windows{"windows", "x86_64", ".dll", ".exe"};
     const fs::path root = fs::temp_directory_path() / "sc64-setup-test-locate";
     fs::remove_all(root);
     // A macOS bundle: base is Contents/Resources, N64Recomp sits in Contents/MacOS.
@@ -201,7 +201,7 @@ void test_recipe() {
 
 // ---- toolchain commands ----
 void test_toolchain() {
-    const HostInfo mac{"macos", "arm64", ".dylib", ""}, linux{"linux", "x86_64", ".so", ""}, windows{"windows", "x86_64", ".dll", ".exe"};
+    const Platform mac{"macos", "arm64", ".dylib", ""}, linux{"linux", "x86_64", ".so", ""}, windows{"windows", "x86_64", ".dll", ".exe"};
     const ModuleSources sources{"/res/module", "/gen", "deadbeef"};
     const Toolchain clang{"clang", "cc", {}, "clang 17", {}}, gcc{"gcc", "gcc", {}, "gcc 13", {}};
     const Toolchain zig = zig_toolchain("/t/zig", linux, "0.0.0", "/t/zig-cache");
@@ -274,6 +274,60 @@ void test_toolchain() {
     CHECK(full.find("L_80000420:\n    { extern void sc64_guest_poll(uint8_t*); sc64_guest_poll(rdram); }") != std::string::npos);
     CHECK(full.find("extern void sc64_guest_poll(uint8_t*);\n") == std::string::npos);  // never bare
     CHECK(small.find("recomp.h") == std::string::npos && small.find("visibility") != std::string::npos);
+}
+
+
+// ---- Android target (cross-built module) ----
+void test_android_target() {
+    const Platform android = parse_target("android-arm64"), linux{"linux", "x86_64", ".so", ""}, mac{"macos", "arm64", ".dylib", ""};
+    CHECK(android.os == "android" && android.arch == "arm64" && android.module_suffix == ".so" && android.exe_suffix.empty());
+    CHECK(platform_name(android) == "android-arm64" && target_names() == std::vector<std::string>{"android-arm64"});
+    CHECK(same_platform(android, parse_target("android-arm64")) && !same_platform(android, linux));
+    CHECK_ERROR(parse_target("amiga-m68k"), "Unknown target amiga-m68k (known: android-arm64)");
+
+    const ModuleSources sources{"/res/module", "/gen", "deadbeef"};
+    const Toolchain ndk = ndk_toolchain("/ndk/bin/clang");
+    CHECK(ndk.program == fs::path("/ndk/bin/clang") && ndk.prefix == std::vector<std::string>{"--target=aarch64-linux-android28"});
+    const auto compile = compile_args(ndk, android, sources, "/gen/funcs_1.c", "/w/funcs_1.o");
+    CHECK(compile[0] == "--target=aarch64-linux-android28" && has(compile, "-fPIC") && has(compile, "-fexceptions"));
+    CHECK(!has(compile, "-mmacosx-version-min=13.0"));
+    const auto link = link_args(ndk, android, {"a.o", "b.o"}, "/w/sc64-game.so");
+    CHECK(link[0] == "--target=aarch64-linux-android28" && has(link, "-shared") && has(link, "-s") && link.back() == "/w/sc64-game.so");
+    for (const char* flag : {"-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384", "-Wl,-z,noexecstack", "-Wl,-z,relro", "-Wl,-z,now"})
+        CHECK(has(link, flag));
+    CHECK(!has(link, "-dynamiclib") && !has_prefix(link, "-Wl,-install_name") && !has(link, "-static-libgcc"));
+    CHECK(!has(link_args(Toolchain{"gcc", "gcc", {}, "", {}}, linux, {"a.o"}, "m.so"), "-Wl,-z,max-page-size=16384"));
+    // An Android module is compiled with the flags of any other position-independent module.
+    CHECK(compile_flags(android) == compile_flags(linux) && compile_flags(android) != compile_flags(Platform{"windows", "x86_64", ".dll", ".exe"}));
+
+    // NDK discovery: explicit roots first, then the newest ndk/<version> of each SDK.
+    const fs::path root = fs::temp_directory_path() / ("sc64-setup-test-ndk-" + std::to_string(std::rand()));
+    fs::remove_all(root);
+    const fs::path sdk = root / "sdk", home = root / "home";
+    for (const char* version : {"9.0.1", "29.0.14206865", "27.1.12297006"}) fs::create_directories(sdk / "ndk" / version);
+    fs::create_directories(root / "explicit");
+    fs::create_directories(home / "Android" / "Sdk" / "ndk" / "26.0.1");
+    const auto env = [&](const char* name) -> std::string {
+        const std::string key = name;
+        if (key == "ANDROID_NDK_ROOT") return (root / "explicit").string();
+        if (key == "ANDROID_SDK_ROOT") return sdk.string();
+        if (key == "ANDROID_HOME") return (root / "missing").string();
+        if (key == "HOME") return home.string();
+        return {};
+    };
+    const auto found = ndk_candidates(linux, env);
+    CHECK(found.size() == 5 && found[0] == root / "explicit");
+    CHECK(found[1] == sdk / "ndk" / "29.0.14206865" && found[2] == sdk / "ndk" / "27.1.12297006" && found[3] == sdk / "ndk" / "9.0.1");
+    CHECK(found[4] == home / "Android" / "Sdk" / "ndk" / "26.0.1");  // the SDK's usual place for the OS
+    CHECK(ndk_candidates(linux, [](const char*) { return std::string(); }).empty());
+    CHECK(ndk_candidates(mac, [&](const char* name) { return std::string(name) == "HOME" ? home.string() : std::string(); }).empty());
+    // A driver is found only where the NDK ships one for this host.
+    const fs::path clang = sdk / "ndk" / "29.0.14206865" / "toolchains" / "llvm" / "prebuilt" / "linux-x86_64" / "bin" / "clang";
+    CHECK(ndk_clang(sdk / "ndk" / "29.0.14206865", linux).empty());
+    write(clang, "");
+    CHECK(ndk_clang(sdk / "ndk" / "29.0.14206865", linux) == clang);
+    CHECK(ndk_clang(sdk / "ndk" / "29.0.14206865", mac).empty());
+    fs::remove_all(root);
 }
 
 // ---- the whole flow ----
@@ -370,7 +424,7 @@ void test_flow() {
     Reporter report;
     report.step = [&](int n, int total, const std::string& text) { CHECK(total == kSteps); steps.push_back({n, text}); };
     report.info = [](const std::string&) {};
-    const HostInfo host = host_info();
+    const Platform host = host_info();
 
     {   // Success, then up to date, then forced, then a changed ABI.
         World w; w.make();
@@ -423,6 +477,45 @@ void test_flow() {
         CHECK(relative.data_dir.is_relative());
         CHECK(run_setup(relative, w.runner(), report).rebuilt);  // the recompiler wrote where the config said, so the paths were absolute
         CHECK(fs::is_regular_file(module_path(w.data, host)));
+        fs::remove_all(w.root);
+    }
+    {   // Cross-building for Android: the NDK compiles, nothing of the host is probed, the host module is left alone.
+        World w; w.make();
+        Options android = w.options();
+        android.target = parse_target("android-arm64");
+        CHECK_ERROR(run_setup(android, w.runner(), report), "Android NDK was not found");
+        android.ndk = w.root / "ndk";
+        fs::create_directories(*android.ndk);
+        CHECK_ERROR(run_setup(android, w.runner(), report), "No clang driver");
+        for (const char* tag : {"darwin-x86_64", "linux-x86_64", "windows-x86_64"})
+            write(*android.ndk / "toolchains" / "llvm" / "prebuilt" / tag / "bin" / ("clang" + host.exe_suffix), "");
+        w.commands.clear();
+        const Result built = run_setup(android, w.runner(), report);
+        CHECK(built.rebuilt && built.module == w.data / "game-android-arm64" / "sc64-game.so" && fs::is_regular_file(built.module));
+        CHECK(!fs::exists(w.data / "game"));
+        const auto receipt = nlohmann::json::parse(sc64::setup::read_file(w.data / "game-android-arm64" / "receipt.json"));
+        CHECK(receipt["target"] == "android-arm64" && receipt["module_sha256"] == file_sha256(built.module));
+        std::size_t ndk_compiles = 0;
+        for (const auto& c : w.commands) {
+            CHECK(c.program == w.recompiler || c.program.filename() == "clang" + host.exe_suffix);
+            if (c.program != w.recompiler) CHECK(!c.args.empty() && c.args[0] == "--target=aarch64-linux-android28");
+            ndk_compiles += has(c.args, "-c");
+        }
+        CHECK(ndk_compiles == 3 + 1);
+        CHECK(module_is_current(android) && !module_is_current(w.options()));  // the host module is a different thing
+        const std::size_t before = w.commands.size();
+        CHECK(!run_setup(android, w.runner(), report).rebuilt && w.commands.size() == before);
+        // A host build next to it does not disturb the Android one, and an old receipt without a target never matches.
+        CHECK(run_setup(w.options(), w.runner(), report).rebuilt && module_is_current(android));
+        auto stale = nlohmann::json::parse(sc64::setup::read_file(w.data / "game-android-arm64" / "receipt.json"));
+        stale.erase("target");
+        write(w.data / "game-android-arm64" / "receipt.json", stale.dump());
+        CHECK(!module_is_current(android));
+        // --compiler still wins over the NDK, and is probed for the target.
+        Options given = android; given.force = true; given.compiler = w.root / "some-clang";
+        w.commands.clear();
+        CHECK(run_setup(given, w.runner(), report).rebuilt);
+        for (const auto& c : w.commands) CHECK(c.program == w.recompiler || c.program == given.compiler);
         fs::remove_all(w.root);
     }
     {   // macOS without the command line tools must not run the cc/clang/gcc shims (they open an installer dialog).
@@ -510,7 +603,7 @@ void test_flow() {
 }
 
 void test_zig_pins() {
-    const HostInfo hosts[] = {{"macos", "arm64", ".dylib", ""}, {"linux", "x86_64", ".so", ""}, {"windows", "x86_64", ".dll", ".exe"}};
+    const Platform hosts[] = {{"macos", "arm64", ".dylib", ""}, {"linux", "x86_64", ".so", ""}, {"windows", "x86_64", ".dll", ".exe"}};
     for (const auto& host : hosts) {
         const auto pin = zig_pin(host);
         CHECK(pin.has_value());
@@ -534,6 +627,7 @@ int main(int argc, char** argv) {
     test_locate();
     test_recipe();
     test_toolchain();
+    test_android_target();
     test_flow();
     test_zig_pins();
     std::puts(failures ? "setup FAILED" : "setup OK");

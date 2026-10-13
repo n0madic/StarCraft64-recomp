@@ -47,23 +47,25 @@ int module_abi(const fs::path& module_dir) {
 
 // Everything the module is built from besides the generated C: its sources, the headers it includes and
 // the compile flags. A new application version that changes any of them must rebuild an existing module.
-std::string module_inputs_sha256(const fs::path& module_dir, const HostInfo& host) {
+std::string module_inputs_sha256(const fs::path& module_dir, const Platform& target) {
     std::string text;
     for (const char* name : {"module_main.c", "sc64_module.h", "sc64_imports.def", "recomp.h", "include/librecomp/sections.h"}) {
         std::error_code error;
         const fs::path file = module_dir / name;
         text += std::string(name) + '=' + (fs::is_regular_file(file, error) ? file_sha256(file) : "absent") + '\n';
     }
-    for (const auto& flag : compile_flags(host)) text += flag + '\n';
+    for (const auto& flag : compile_flags(target)) text += flag + '\n';
     return sha256_of(text);
 }
 
-nlohmann::json expected_receipt(const Options& options, const HostInfo& host) {
+nlohmann::json expected_receipt(const Options& options, const Platform& target) {
     const fs::path recipe_dir = options.resources / "recipe" / "ntsc-u", module_dir = options.resources / "module";
-    return {{"schema", kReceiptSchema}, {"abi", module_abi(module_dir)}, {"rom_sha1", options.rom_sha1},
-            {"recipe_sha256", file_sha256(recipe_dir / std::string(kManifestFile))},
-            {"recompiler_sha256", file_sha256(options.recompiler)},
-            {"sources_sha256", module_inputs_sha256(module_dir, host)}};
+    nlohmann::json receipt{{"schema", kReceiptSchema}, {"abi", module_abi(module_dir)}, {"rom_sha1", options.rom_sha1},
+                           {"recipe_sha256", file_sha256(recipe_dir / std::string(kManifestFile))},
+                           {"recompiler_sha256", file_sha256(options.recompiler)},
+                           {"sources_sha256", module_inputs_sha256(module_dir, target)}};
+    if (options.target) receipt["target"] = platform_name(target);  // host receipts keep their original shape
+    return receipt;
 }
 
 bool up_to_date(const fs::path& module, const fs::path& receipt, const nlohmann::json& expected) {
@@ -73,6 +75,7 @@ bool up_to_date(const fs::path& module, const fs::path& receipt, const nlohmann:
         const auto found = nlohmann::json::parse(read_file(receipt));
         for (const char* key : {"schema", "abi", "rom_sha1", "recipe_sha256", "recompiler_sha256", "sources_sha256"})
             if (found.at(key) != expected.at(key)) return false;
+        if (found.value("target", "") != expected.value("target", "")) return false;
         return found.at("module_sha256") == file_sha256(module);
     } catch (const std::exception&) {
         return false;
@@ -84,13 +87,23 @@ struct Logs {
     fs::path file(const std::string& name) const { return directory / (name + ".log"); }
 };
 
-Toolchain choose_toolchain(const Options& options, const HostInfo& host, const Runner& run, const Logs& logs,
-                           const fs::path& scratch, const Reporter& report) {
+Toolchain choose_toolchain(const Options& options, const Platform& host, const Platform& target, const Runner& run,
+                           const Logs& logs, const fs::path& scratch, const Reporter& report) {
     if (options.compiler) {
-        auto found = probe(run, {"", *options.compiler, {}, "", {}}, host, scratch / "probe-given", options.resources / "module");
+        auto found = probe(run, {"", *options.compiler, {}, "", {}}, target, scratch / "probe-given", options.resources / "module");
         if (!found) throw SetupError("The compiler " + utf8(*options.compiler) + " cannot build the game module "
                                      "(a probe build failed). Use gcc or clang, or leave --compiler out.");
         return *found;
+    }
+    if (target.os == "android") {
+        const fs::path clang = options.ndk ? ndk_clang(*options.ndk, host) : fs::path();
+        if (clang.empty())
+            throw SetupError(options.ndk ? "No clang driver for this machine under the Android NDK " + utf8(*options.ndk)
+                                         : "The Android NDK was not found. Install it with the Android SDK manager (sdkmanager \"ndk;<version>\"), "
+                                               "then pass --ndk PATH or set ANDROID_NDK_ROOT.");
+        if (auto found = probe(run, ndk_toolchain(clang), target, scratch / "probe-ndk", options.resources / "module")) return *found;
+        throw SetupError("The Android NDK compiler " + utf8(clang) + " could not build the probe module; see " +
+                         utf8(scratch / "probe-ndk" / "probe.log"));
     }
     int number = 0;
     if (!options.use_zig) {
@@ -123,25 +136,33 @@ std::vector<fs::path> generated_sources(const fs::path& generated) {
 }
 }
 
-fs::path module_path(const fs::path& data_dir, const HostInfo& host) {
-    return data_dir / "game" / ("sc64-game" + host.module_suffix);
+fs::path game_directory(const fs::path& data_dir, const Platform& platform, bool cross) {
+    return data_dir / (cross ? "game-" + platform_name(platform) : std::string("game"));
+}
+
+fs::path module_path(const fs::path& data_dir, const Platform& platform, bool cross) {
+    return game_directory(data_dir, platform, cross) / ("sc64-game" + platform.module_suffix);
 }
 
 bool module_is_current(const Options& options) {
-    const HostInfo host = host_info();
+    const Platform target = options.target.value_or(host_info());
+    const bool cross = options.target.has_value();
     try {
-        return up_to_date(module_path(options.data_dir, host), options.data_dir / "game" / "receipt.json", expected_receipt(options, host));
+        return up_to_date(module_path(options.data_dir, target, cross), game_directory(options.data_dir, target, cross) / "receipt.json",
+                          expected_receipt(options, target));
     } catch (const std::exception&) {
         return false;
     }
 }
 
 Result run_setup(const Options& options, const Runner& run, const Reporter& report) {
-    const HostInfo host = host_info();
+    const Platform host = host_info();
+    const Platform target = options.target.value_or(host);
+    const bool cross = options.target.has_value();
     const auto say = [&](int number, const std::string& text) { if (report.step) report.step(number, kSteps, text); };
     const auto info = [&](const std::string& text) { if (report.info) report.info(text); };
     Result result;
-    result.module = module_path(options.data_dir, host);
+    result.module = module_path(options.data_dir, target, cross);
 
     say(1, "Checking the ROM");
     std::string owned;  // the bytes read from `rom`, or a normalized copy of rom_image
@@ -171,8 +192,8 @@ Result run_setup(const Options& options, const Runner& run, const Reporter& repo
     const fs::path module_dir = options.resources / "module";
     const Manifest manifest = load_recipe(recipe_dir, options.rom_sha1);
     if (!fs::is_regular_file(options.recompiler)) throw SetupError("N64Recomp not found: " + utf8(options.recompiler));
-    nlohmann::json receipt = expected_receipt(options, host);
-    const fs::path receipt_path = options.data_dir / "game" / "receipt.json";
+    nlohmann::json receipt = expected_receipt(options, target);
+    const fs::path receipt_path = game_directory(options.data_dir, target, cross) / "receipt.json";
     if (!options.force && up_to_date(result.module, receipt_path, receipt)) {
         info("The game module is already built for this ROM");
         return result;
@@ -193,7 +214,7 @@ Result run_setup(const Options& options, const Runner& run, const Reporter& repo
 
     say(2, "Looking for a C compiler");
     // Probe builds go beside the logs: the work directory is removed on failure, the diagnostics are not.
-    const Toolchain toolchain = choose_toolchain(options, host, run, logs, logs.directory, report);
+    const Toolchain toolchain = choose_toolchain(options, host, target, run, logs, logs.directory, report);
     result.compiler = toolchain.kind + ": " + toolchain.version;
     info(result.compiler);
 
@@ -227,7 +248,7 @@ Result run_setup(const Options& options, const Runner& run, const Reporter& repo
     std::vector<fs::path> objects;
     for (const auto& source : inputs) {
         objects.push_back(work / "obj" / (path_utf8(source.stem()) + ".o"));
-        compiles.push_back({toolchain.program, compile_args(toolchain, host, sources, source, objects.back()), logs.file("compile"), toolchain.env});
+        compiles.push_back({toolchain.program, compile_args(toolchain, target, sources, source, objects.back()), logs.file("compile"), toolchain.env});
     }
     const BatchResult compiled = run_batch(run, compiles, options.jobs, [&](std::size_t done, std::size_t total) {
         info("Compiled " + std::to_string(done) + "/" + std::to_string(total));
@@ -235,15 +256,15 @@ Result run_setup(const Options& options, const Runner& run, const Reporter& repo
     if (!compiled.ok)
         throw SetupError("Compiling " + path_utf8(inputs[compiled.failed].filename()) + " failed (exit " +
                          std::to_string(compiled.status) + "); see " + utf8(logs.file("compile")));
-    const fs::path built = work / ("sc64-game" + host.module_suffix);
-    if (run({toolchain.program, link_args(toolchain, host, objects, built), logs.file("link"), toolchain.env}) != 0 || !fs::is_regular_file(built))
+    const fs::path built = work / ("sc64-game" + target.module_suffix);
+    if (run({toolchain.program, link_args(toolchain, target, objects, built), logs.file("link"), toolchain.env}) != 0 || !fs::is_regular_file(built))
         throw SetupError("Linking the game module failed; see " + utf8(logs.file("link")));
 
     say(5, "Installing the game module");
     receipt["module_sha256"] = file_sha256(built);
     receipt["compiler"] = result.compiler;
     fs::create_directories(result.module.parent_path());
-    const fs::path staged = result.module.parent_path() / (".sc64-game.new" + host.module_suffix);
+    const fs::path staged = result.module.parent_path() / (".sc64-game.new" + target.module_suffix);
     copy_bytes(built, staged);
     try {
         fs::rename(staged, result.module);

@@ -13,6 +13,9 @@ BUNDLE_ROM ?= 0
 ALLOW_DIRTY ?= 0
 FORCE ?= 0
 USE_ZIG ?= 0
+# setup-game: android-arm64 cross-builds the module for a phone; NDK overrides the pinned one.
+MODULE_TARGET ?=
+NDK ?=
 # 1 builds the Linux package in the pinned Docker image even on a Linux x86_64 host.
 DOCKER ?= 0
 SERIAL ?=
@@ -40,7 +43,7 @@ endif
 endif
 SC64 = $(PYTHON) tools/sc64.py
 DOCKER_FLAG = $(if $(filter 1,$(DOCKER)),--docker)
-export ALLOW_DIRTY ANALYSIS DATA_DIR FORCE USE_ZIG RECOMPILER_TARGET ROM BUNDLE_ROM RECOMP_PYTHON SERIAL ADB ANDROID_SDK APK STORAGE REPORT RUN_SECONDS SMOKE_SECONDS JOBS
+export ALLOW_DIRTY ANALYSIS DATA_DIR FORCE USE_ZIG MODULE_TARGET NDK RECOMPILER_TARGET ROM BUNDLE_ROM RECOMP_PYTHON SERIAL ADB ANDROID_SDK APK STORAGE REPORT RUN_SECONDS SMOKE_SECONDS JOBS
 export BASELINE_REPLAY RENDERER_MANIFEST
 export PAGE_SIZE ANDROID_BACKEND ANDROID_DEBUGGABLE ANDROID_RENDER_DRIVER BUILD_TYPE
 
@@ -56,7 +59,7 @@ help:
 	  'make recompile ROM="/path/game.z64"  Generate local/generated/game from the ROM (runs inventory first if it is missing)' \
 	  'make recipe-verify ROM=...  Regenerate the game C from the committed recipe (recipe/ntsc-u) and compare hashes' \
 	  'make package / package-macos / package-linux / package-windows  Release launcher (no game code) in local/dist/launcher' \
-	  'make setup-game ROM=... [USE_ZIG=1] [DATA_DIR=...]  Build the game module from the ROM like a user would (sc64_setup)' \
+	  'make setup-game ROM=... [USE_ZIG=1] [DATA_DIR=...] [MODULE_TARGET=android-arm64]  Build the game module from the ROM like a user would (sc64_setup)' \
 	  'make build-recompiler [RECOMPILER_TARGET=linux-x86_64]  Patched N64Recomp release binary in local/dist/recompiler' \
 	  'make verify-recompiler ROM=...  Run it on the recipe and compare the generated hashes' \
 	  'make recipe-export ANALYSIS=local/recompile/symbols-<stamp>  Refresh the recipe after a recompile (maintainers)' \

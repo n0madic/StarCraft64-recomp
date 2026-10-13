@@ -7,7 +7,7 @@ std::vector<fs::path> resource_candidates(const fs::path& base) {
     return {base / "setup-resources", base / ".." / "Resources" / "setup-resources"};
 }
 
-std::vector<fs::path> recompiler_candidates(const fs::path& base, const HostInfo& host) {
+std::vector<fs::path> recompiler_candidates(const fs::path& base, const Platform& host) {
     const std::string name = "N64Recomp" + host.exe_suffix;
     return {base / name, base / ".." / "MacOS" / name};
 }

@@ -18,9 +18,9 @@ struct ZigPin {
 };
 
 std::string_view zig_version();
-std::optional<ZigPin> zig_pin(const HostInfo& host);
+std::optional<ZigPin> zig_pin(const Platform& host);
 // The compiler under tools_dir, downloading it first when absent. `log` receives curl/tar output;
 // `info` gets one line per phase. Throws SetupError with a manual-install hint on failure.
-std::filesystem::path ensure_zig(const Runner& run, const HostInfo& host, const std::filesystem::path& tools_dir,
+std::filesystem::path ensure_zig(const Runner& run, const Platform& host, const std::filesystem::path& tools_dir,
                                  const std::filesystem::path& log, const std::function<void(const std::string&)>& info);
 }

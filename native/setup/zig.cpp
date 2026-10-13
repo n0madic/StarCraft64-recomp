@@ -22,13 +22,13 @@ constexpr std::array<ZigPin, 3> kPins{{
 
 std::string_view zig_version() { return kVersion; }
 
-std::optional<ZigPin> zig_pin(const HostInfo& host) {
+std::optional<ZigPin> zig_pin(const Platform& host) {
     for (const auto& pin : kPins)
         if (pin.os == host.os && pin.arch == host.arch) return pin;
     return std::nullopt;
 }
 
-std::filesystem::path ensure_zig(const Runner& run, const HostInfo& host, const std::filesystem::path& tools_dir,
+std::filesystem::path ensure_zig(const Runner& run, const Platform& host, const std::filesystem::path& tools_dir,
                                  const std::filesystem::path& log, const std::function<void(const std::string&)>& info) {
     const auto install = tools_dir / ("zig-" + std::string(kVersion));
     const auto binary = install / ("zig" + host.exe_suffix);

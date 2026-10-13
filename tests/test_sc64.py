@@ -297,6 +297,26 @@ class SetupGameTests(unittest.TestCase):
         self.assertIn('--use-zig', run)
         self.assertNotIn('--force', run)
 
+    def test_android_module_target_passes_the_pinned_ndk(self):
+        with tempfile.TemporaryDirectory() as directory, clean_env(), mock.patch.object(driver, 'ROOT', Path(directory)):
+            recompiler = Path(directory) / 'local/dist/recompiler/linux-x86_64/N64Recomp'
+            recompiler.parent.mkdir(parents=True)
+            recompiler.write_text('')
+            sdk = Path(directory) / 'sdk'
+            (sdk / 'ndk' / driver.pins.SDK_REVISION).mkdir(parents=True)
+            lines = commands(LINUX, 'setup-game', '--rom', '/g.z64', '--module-target', 'android-arm64', '--sdk', str(sdk))
+            run = lines[2]
+            self.assertEqual(run[run.index('--target') + 1], 'android-arm64')
+            self.assertEqual(Path(run[run.index('--ndk') + 1]), sdk / 'ndk' / driver.pins.SDK_REVISION)
+            explicit = commands(LINUX, 'setup-game', '--rom', '/g.z64', '--module-target', 'android-arm64', '--ndk', '/n')[2]
+            self.assertEqual(explicit[explicit.index('--ndk') + 1], '/n')
+            # Without a pinned NDK sc64_setup looks for one itself ($ANDROID_NDK_ROOT).
+            bare = commands(LINUX, 'setup-game', '--rom', '/g.z64', '--module-target', 'android-arm64', '--sdk', directory)[2]
+            self.assertIn('--target', bare)
+            self.assertNotIn('--ndk', bare)
+            host = commands(LINUX, 'setup-game', '--rom', '/g.z64')[2]
+            self.assertNotIn('--target', host)
+
     def test_a_missing_recompiler_names_the_command_that_builds_it(self):
         with tempfile.TemporaryDirectory() as directory, clean_env(), mock.patch.object(driver, 'ROOT', Path(directory)):
             with self.assertRaisesRegex(SystemExit, 'build-recompiler'):

@@ -1,12 +1,13 @@
 #include "toolchain.hpp"
 #include "recipe.hpp"
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 
 namespace sc64::setup {
-HostInfo host_info() {
-    HostInfo host;
+Platform host_info() {
+    Platform host;
 #if defined(__APPLE__)
     host.os = "macos"; host.module_suffix = ".dylib";
 #elif defined(_WIN32)
@@ -22,18 +23,31 @@ HostInfo host_info() {
     return host;
 }
 
-std::vector<std::string> compile_flags(const HostInfo& host) {
+Platform parse_target(const std::string& name) {
+    if (name == "android-arm64") return {"android", "arm64", ".so", ""};
+    std::string known;
+    for (const auto& entry : target_names()) known += (known.empty() ? "" : ", ") + entry;
+    throw SetupError("Unknown target " + name + " (known: " + known + ")");
+}
+
+std::vector<std::string> target_names() { return {"android-arm64"}; }
+
+std::string platform_name(const Platform& platform) { return platform.os + "-" + platform.arch; }
+
+bool same_platform(const Platform& a, const Platform& b) { return a.os == b.os && a.arch == b.arch; }
+
+std::vector<std::string> compile_flags(const Platform& target) {
     std::vector<std::string> flags{"-std=c17", "-O2", "-fno-strict-aliasing", "-ffp-contract=off", "-fexceptions",
                                    "-fvisibility=hidden"};
-    if (host.os != "windows") flags.push_back("-fPIC");
+    if (target.os != "windows") flags.push_back("-fPIC");
     return flags;
 }
 
-std::vector<std::string> compile_args(const Toolchain& toolchain, const HostInfo& host, const ModuleSources& sources,
+std::vector<std::string> compile_args(const Toolchain& toolchain, const Platform& target, const ModuleSources& sources,
                                       const std::filesystem::path& source, const std::filesystem::path& object) {
     std::vector<std::string> args = toolchain.prefix;
-    for (auto& flag : compile_flags(host)) args.push_back(std::move(flag));
-    if (host.os == "macos" && toolchain.kind != "zig") args.push_back("-mmacosx-version-min=13.0");
+    for (auto& flag : compile_flags(target)) args.push_back(std::move(flag));
+    if (target.os == "macos" && toolchain.kind != "zig") args.push_back("-mmacosx-version-min=13.0");
     args.push_back("-DSC64_MODULE_ROM_SHA1=\"" + sources.rom_sha1 + "\"");
     args.push_back("-I" + path_utf8(sources.module_dir));
     args.push_back("-I" + path_utf8(sources.module_dir / "include"));
@@ -42,32 +56,95 @@ std::vector<std::string> compile_args(const Toolchain& toolchain, const HostInfo
     return args;
 }
 
-std::vector<std::string> link_args(const Toolchain& toolchain, const HostInfo& host,
+std::vector<std::string> link_args(const Toolchain& toolchain, const Platform& target,
                                    const std::vector<std::filesystem::path>& objects, const std::filesystem::path& output) {
     std::vector<std::string> args = toolchain.prefix;
-    args.push_back(host.os == "macos" && toolchain.kind != "zig" ? "-dynamiclib" : "-shared");
-    if (host.os == "macos" && toolchain.kind != "zig") args.push_back("-mmacosx-version-min=13.0");
+    args.push_back(target.os == "macos" && toolchain.kind != "zig" ? "-dynamiclib" : "-shared");
+    if (target.os == "macos" && toolchain.kind != "zig") args.push_back("-mmacosx-version-min=13.0");
     // The install name would otherwise record the temporary work directory.
-    if (host.os == "macos") args.push_back("-Wl,-install_name,@rpath/" + path_utf8(output.filename()));
-    if (host.os != "macos") args.push_back("-s");  // symbols are not needed; the module is large otherwise
-    if (host.os == "windows") args.push_back("-static-libgcc");
+    if (target.os == "macos") args.push_back("-Wl,-install_name,@rpath/" + path_utf8(output.filename()));
+    if (target.os != "macos") args.push_back("-s");  // symbols are not needed; the module is large otherwise
+    if (target.os == "windows") args.push_back("-static-libgcc");
+    if (target.os == "android")  // 16 KiB pages (the app's own libraries use the same alignment), no executable stack
+        args.insert(args.end(), {"-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384", "-Wl,-z,noexecstack",
+                                 "-Wl,-z,relro", "-Wl,-z,now"});
     for (const auto& object : objects) args.push_back(path_utf8(object));
     args.insert(args.end(), {"-o", path_utf8(output)});
     return args;
 }
 
-std::string zig_target(const HostInfo& host) {
-    const std::string arch = host.arch == "arm64" ? "aarch64" : "x86_64";
-    if (host.os == "macos") return arch + "-macos.13.0";
-    if (host.os == "windows") return arch + "-windows-gnu";
+std::string zig_target(const Platform& platform) {
+    const std::string arch = platform.arch == "arm64" ? "aarch64" : "x86_64";
+    if (platform.os == "macos") return arch + "-macos.13.0";
+    if (platform.os == "windows") return arch + "-windows-gnu";
     return arch + "-linux-gnu.2.17";
 }
 
-Toolchain zig_toolchain(const std::filesystem::path& zig, const HostInfo& host, const std::string& version,
+Toolchain zig_toolchain(const std::filesystem::path& zig, const Platform& host, const std::string& version,
                         const std::filesystem::path& cache_dir) {
     // zig keeps compiled libc support and compiler_rt in a cache; keep it with the tool, not in a profile folder.
     return {"zig", zig, {"cc", "-target", zig_target(host)}, "zig " + version,
             {{"ZIG_GLOBAL_CACHE_DIR", path_utf8(cache_dir / "global")}, {"ZIG_LOCAL_CACHE_DIR", path_utf8(cache_dir / "local")}}};
+}
+
+namespace {
+std::string ndk_prebuilt_tag(const Platform& host) {
+    // The NDK ships one x86_64 host toolchain per OS (it runs on Apple silicon through Rosetta).
+    return host.os == "macos" ? "darwin-x86_64" : host.os == "windows" ? "windows-x86_64" : "linux-x86_64";
+}
+
+std::filesystem::path sdk_default(const Platform& host, const std::function<std::string(const char*)>& env) {
+    if (host.os == "windows") {
+        const std::string local = env("LOCALAPPDATA");
+        return local.empty() ? std::filesystem::path() : path_from_utf8(local) / "Android" / "Sdk";
+    }
+    const std::string home = env("HOME");
+    if (home.empty()) return {};
+    return host.os == "macos" ? path_from_utf8(home) / "Library" / "Android" / "sdk" : path_from_utf8(home) / "Android" / "Sdk";
+}
+}
+
+std::vector<std::filesystem::path> ndk_candidates(const Platform& host, const std::function<std::string(const char*)>& env) {
+    namespace fs = std::filesystem;
+    std::vector<fs::path> result;
+    const auto add = [&](const fs::path& path) {
+        std::error_code error;
+        if (!path.empty() && fs::is_directory(path, error) && std::find(result.begin(), result.end(), path) == result.end())
+            result.push_back(path);
+    };
+    for (const char* name : {"ANDROID_NDK_ROOT", "ANDROID_NDK_HOME", "ANDROID_NDK"})
+        if (const std::string value = env(name); !value.empty()) add(path_from_utf8(value));
+    std::vector<fs::path> sdks;
+    for (const char* name : {"ANDROID_SDK_ROOT", "ANDROID_HOME", "ANDROID_SDK"})
+        if (const std::string value = env(name); !value.empty()) sdks.push_back(path_from_utf8(value));
+    sdks.push_back(sdk_default(host, env));
+    for (const auto& sdk : sdks) {
+        std::error_code error;
+        std::vector<fs::path> versions;
+        if (fs::is_directory(sdk / "ndk", error))
+            for (const auto& entry : fs::directory_iterator(sdk / "ndk", error))
+                if (entry.is_directory(error)) versions.push_back(entry.path());
+        std::sort(versions.begin(), versions.end(), [](const fs::path& a, const fs::path& b) {
+            const auto number = [](const fs::path& p) {  // 29.0.14206865 sorts after 9.x
+                return std::strtol(path_utf8(p.filename()).c_str(), nullptr, 10);
+            };
+            return number(a) != number(b) ? number(a) > number(b) : a.filename() > b.filename();
+        });
+        for (const auto& version : versions) add(version);
+        add(sdk / "ndk-bundle");
+    }
+    return result;
+}
+
+std::filesystem::path ndk_clang(const std::filesystem::path& ndk, const Platform& host) {
+    const auto clang = ndk / "toolchains" / "llvm" / "prebuilt" / ndk_prebuilt_tag(host) / "bin" / ("clang" + host.exe_suffix);
+    std::error_code error;
+    return std::filesystem::is_regular_file(clang, error) ? clang : std::filesystem::path();
+}
+
+Toolchain ndk_toolchain(const std::filesystem::path& clang) {
+    // `clang --target=...` is what the NDK's aarch64-linux-androidNN-clang wrappers run (a .cmd on Windows).
+    return {"clang", clang, {"--target=aarch64-linux-android" + std::to_string(kAndroidApi)}, "", {}};
 }
 
 bool macos_developer_tools(const Runner& run, const std::filesystem::path& scratch) {
@@ -78,7 +155,7 @@ bool macos_developer_tools(const Runner& run, const std::filesystem::path& scrat
     return !path.empty() && std::filesystem::is_directory(path_from_utf8(path), error);
 }
 
-std::vector<Toolchain> system_candidates(const HostInfo& host, const std::string& cc_env, bool shims) {
+std::vector<Toolchain> system_candidates(const Platform& host, const std::string& cc_env, bool shims) {
     std::vector<Toolchain> result;
     if (!cc_env.empty()) {
         std::istringstream words(cc_env);
@@ -165,7 +242,7 @@ __attribute__((visibility("default"))) const SectionTableEntry* sc64_probe(void)
 )";
 }
 
-std::optional<Toolchain> probe(const Runner& run, Toolchain candidate, const HostInfo& host,
+std::optional<Toolchain> probe(const Runner& run, Toolchain candidate, const Platform& target,
                                const std::filesystem::path& scratch, const std::filesystem::path& module_dir) {
     std::filesystem::create_directories(scratch);
     Command version{candidate.program, candidate.prefix, {}, candidate.env};
@@ -181,12 +258,12 @@ std::optional<Toolchain> probe(const Runner& run, Toolchain candidate, const Hos
     const bool full = !module_dir.empty() && std::filesystem::is_regular_file(module_dir / "recomp.h", header_error);
     write_file(source, probe_source(full));  // binary: the same bytes on every host
     const auto object = scratch / "probe.o";
-    const auto output = scratch / ("probe" + host.module_suffix);
+    const auto output = scratch / ("probe" + target.module_suffix);
     ModuleSources none{full ? module_dir : scratch, scratch, "0"};
     try {
         const auto log = scratch / "probe.log";
-        if (run({candidate.program, compile_args(candidate, host, none, source, object), log, candidate.env}) != 0) return std::nullopt;
-        if (run({candidate.program, link_args(candidate, host, {object}, output), log, candidate.env}) != 0) return std::nullopt;
+        if (run({candidate.program, compile_args(candidate, target, none, source, object), log, candidate.env}) != 0) return std::nullopt;
+        if (run({candidate.program, link_args(candidate, target, {object}, output), log, candidate.env}) != 0) return std::nullopt;
     } catch (const std::exception&) {
         return std::nullopt;
     }

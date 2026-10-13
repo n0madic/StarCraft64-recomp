@@ -59,6 +59,7 @@ User-facing discussion is normally Russian. All project documentation is English
   (ADR-088). Launchers never contain the ROM, generated code, the game module or the game icon.
 - `native/setup/`: `sc64_setup` and its library, ROM to game module with the prebuilt N64Recomp and a
   probed compiler or pinned zig (ADR-087); the shell builds the module on first run through it.
+  `--target android-arm64` cross-builds it for a phone with the NDK (ADR-089).
 - `native/module/`: the game-module ABI (`sc64_module.h`, `sc64_imports.def`), `module_main.c`
   and the shim `librecomp/sections.h`; the generated C is built into `sc64-game.*` (ADR-086).
 - `native/android/`: NDK profile, manifest, `Sc64Activity` and haptics JNI helper.

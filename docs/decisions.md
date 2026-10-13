@@ -2253,3 +2253,37 @@ correctness, not speed.
   unknown.
 - `make setup-game` builds `sc64_setup` from its own tree (`local/build/setup`, `desktop/build.py
   --setup-only`) that needs no generated game code.
+
+## ADR-089 — `sc64_setup --target android-arm64` cross-builds the game module for a phone (ACCEPTED, shell side pending)
+
+**Context:** ADR-086 left Android statically linked and ADR-087 builds only for the machine it runs on. A
+launcher APK without game code (the Android counterpart of ADR-088) needs a module for arm64 bionic that
+the user's own computer can build. A phone has no compiler, and compiling there would mean shipping N64Recomp
+and a toolchain as executables of an APK (W^X forbids running them from app storage). Spikes on the pinned
+tools: zig 0.16 cannot provide Android's libc (`unable to provide libc for target aarch64-linux-android`, only
+glibc and musl), so there is no download fallback as on the desktop; the NDK's clang builds the whole game
+(84 sources, 4 s with 8 jobs) into a 3.2 MB `sc64-game.so` that needs only `libc.so` and `libdl.so`, exports
+only `sc64_module_init` and has 16 KiB-aligned segments and a non-executable stack. A throwaway probe APK
+(not kept in the repository) showed on a Samsung SM-F966B, Android 16, 4 KiB pages, targetSdk 36 that an
+app can `dlopen` a module of this kind (the synthetic fixture of the loader test) from its internal files
+directory, with a writable or read-only file, and run the loader checks including host exceptions through
+module frames; app-specific external storage (`/storage/emulated/0/Android/data/...`) is refused by the
+linker namespace.
+
+**Decision:** `sc64_setup` takes `--target android-arm64` (`Options::target`) and `--ndk PATH`. The platform
+description `HostInfo` became `Platform` and is used for the target as well as the host: the target decides
+the module suffix, flags and link arguments, the host decides which N64Recomp, zig and `xcode-select` are
+used. For Android the compiler is the NDK's `clang --target=aarch64-linux-android28` (the arguments of its
+wrapper scripts, so no `.cmd` is needed on Windows), found through `--ndk`, `$ANDROID_NDK_ROOT`,
+`$ANDROID_NDK_HOME`, `$ANDROID_NDK` or the newest `ndk/<version>` of the Android SDK; `--compiler` still wins.
+The probe builds the full game shape for the target before any code is generated. Android links add
+`-Wl,-z,max-page-size=16384`, `common-page-size=16384`, `noexecstack`, `relro` and `now`. The module and its
+receipt go to `<data>/game-android-arm64/`, and the receipt carries `"target": "android-arm64"`; host
+receipts are unchanged and a receipt of one target never matches the other. The generated C is identical for
+every target (the same N64Recomp, the same recipe hashes). `make setup-game MODULE_TARGET=android-arm64`
+passes the pinned NDK of the APK build when the SDK has it.
+
+**Consequences:** The module is built on the user's computer and must be copied into the app's internal
+files directory by the app itself (external storage cannot be loaded from, so an `adb push` or a file
+picker only stages it). Open: the shell side (Android build without `SC64_STATIC_GAME`, import and receipt
+check of the module, first-run guidance) and loading the real module on a device, listed in D-062.

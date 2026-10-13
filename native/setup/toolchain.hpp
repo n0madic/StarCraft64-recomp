@@ -9,13 +9,20 @@
 #include <vector>
 
 namespace sc64::setup {
-struct HostInfo {
-    std::string os;      // macos | linux | windows
+// A platform a binary runs on: the machine running the setup (host_info) or the target of a
+// cross-built module (parse_target).
+struct Platform {
+    std::string os;      // macos | linux | windows | android
     std::string arch;    // arm64 | x86_64
     std::string module_suffix;  // .dylib | .so | .dll
     std::string exe_suffix;     // "" | .exe
 };
-HostInfo host_info();
+Platform host_info();
+// The module targets `sc64_setup --target` accepts. parse_target throws SetupError for anything else.
+std::vector<std::string> target_names();
+Platform parse_target(const std::string& name);
+std::string platform_name(const Platform& platform);  // for example android-arm64
+bool same_platform(const Platform& a, const Platform& b);
 
 struct Toolchain {
     std::string kind;                // clang | gcc | zig
@@ -32,25 +39,36 @@ struct ModuleSources {
 };
 
 // Flags shared by every compiler; kept in step with cmake/game_module.cmake (tested).
-std::vector<std::string> compile_flags(const HostInfo& host);
-std::vector<std::string> compile_args(const Toolchain& toolchain, const HostInfo& host, const ModuleSources& sources,
+std::vector<std::string> compile_flags(const Platform& target);
+std::vector<std::string> compile_args(const Toolchain& toolchain, const Platform& target, const ModuleSources& sources,
                                       const std::filesystem::path& source, const std::filesystem::path& object);
-std::vector<std::string> link_args(const Toolchain& toolchain, const HostInfo& host,
+std::vector<std::string> link_args(const Toolchain& toolchain, const Platform& target,
                                    const std::vector<std::filesystem::path>& objects, const std::filesystem::path& output);
 // zig's -target for this host, with the baseline libc version the module is built against.
-std::string zig_target(const HostInfo& host);
-Toolchain zig_toolchain(const std::filesystem::path& zig, const HostInfo& host, const std::string& version,
+std::string zig_target(const Platform& host);
+Toolchain zig_toolchain(const std::filesystem::path& zig, const Platform& host, const std::string& version,
                         const std::filesystem::path& cache_dir);
+
+// The Android NDK (clang for arm64 at the app's API level). The module is built against the NDK's
+// bionic sysroot; zig cannot provide Android's libc, so there is no download fallback.
+inline constexpr int kAndroidApi = 28;
+// Directories that may hold an NDK, best first: $ANDROID_NDK_ROOT, $ANDROID_NDK_HOME, $ANDROID_NDK, then the
+// newest `ndk/<version>` under $ANDROID_SDK_ROOT, $ANDROID_HOME, $ANDROID_SDK and the SDK's usual place for
+// `host`. `env` returns an environment variable or "". Only directories that exist are returned.
+std::vector<std::filesystem::path> ndk_candidates(const Platform& host, const std::function<std::string(const char*)>& env);
+// The NDK's clang driver for `host`; empty if `ndk` is not an NDK root.
+std::filesystem::path ndk_clang(const std::filesystem::path& ndk, const Platform& host);
+Toolchain ndk_toolchain(const std::filesystem::path& clang);
 
 // Compilers worth probing, in order: $CC (may carry arguments), then the usual names. Without
 // `shims`, the bare names cc, clang and gcc are left out (see macos_developer_tools).
-std::vector<Toolchain> system_candidates(const HostInfo& host, const std::string& cc_env, bool shims = true);
+std::vector<Toolchain> system_candidates(const Platform& host, const std::string& cc_env, bool shims = true);
 // macOS only: whether the command line developer tools are installed. Without them /usr/bin/cc, clang
 // and gcc are xcode-select shims that open the system installer dialog when run, so they must not be probed.
 bool macos_developer_tools(const Runner& run, const std::filesystem::path& scratch);
 // Fills in kind/version and builds a tiny module the way the real one is built; nullopt if that fails.
 // `module_dir` holds the module sources (recomp.h, sections.h shim); the probe uses them when present.
-std::optional<Toolchain> probe(const Runner& run, Toolchain candidate, const HostInfo& host,
+std::optional<Toolchain> probe(const Runner& run, Toolchain candidate, const Platform& target,
                                const std::filesystem::path& scratch, const std::filesystem::path& module_dir = {});
 // The probe's source. `full` builds what the game module is made of: recomp.h, a function in the shape of
 // the recompiler's output (a label followed by a hook block, gotos, a jump-table switch, the memory, float
