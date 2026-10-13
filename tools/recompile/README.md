@@ -9,10 +9,14 @@ One command runs the whole chain below (patch and build N64Recomp, `prepare.py`,
 and leaves `local/generated/game` ready for `make build`:
 
 ```sh
-make recompile ROM="/path/to/your.z64"
+make venv                                # once: .venv with the pinned spimdisasm/rabbitizer
+make recompile ROM="/path/to/your.z64"   # = python tools/sc64.py recompile --rom ...
 ```
 
-It needs the project `.venv` (spimdisasm) and the prepared libultra inventory
+Both commands run unchanged on macOS, Linux and Windows (ADR-082); `RECOMP_PYTHON`
+or `--recomp-python` selects another interpreter than `.venv`. The recompiler is
+built with LLVM when it is found (Homebrew or `LLVM_BIN`), otherwise with `CC`/`CXX`
+or the system compiler. It needs the project `.venv` (spimdisasm) and the prepared libultra inventory
 `local/reports/libultra-resident/inventory.json`, which is verified but never
 rebuilt (see [libultra-inventory.md](../../docs/libultra-inventory.md)). Each run
 analyzes into a fresh `local/recompile/symbols-<timestamp>/`; an existing
@@ -37,8 +41,10 @@ python3 tools/recompile/audit_indirect_entries.py 'StarCraft 64 (USA).z64' \
 python3 -m unittest discover -s tests -p 'test_recompile_symbols.py' -v
 ```
 
-The compiler paths above describe the verified macOS development machine.
-Choose installed C/C++ compilers on another host. The forced `cstdlib` include
+The compiler paths above describe the verified macOS development machine;
+`recompile_all.py` itself discovers LLVM and falls back to the system compiler.
+Choose installed C/C++ compilers on another host (the N64Recomp build has been
+run on macOS only, D-057). On Windows the recompiler binary is `N64Recomp.exe`. The forced `cstdlib` include
 works around the pinned Rabbitizer source omitting declarations of `malloc`
 and `free`; it does not modify the library source or generated guest code.
 

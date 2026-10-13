@@ -53,8 +53,9 @@ User-facing discussion is normally Russian. All project documentation is English
 - `native/shell/input/`: SDL-free gesture/menu/HUD/minimap/touch-pad adapters.
 - `native/android/`: NDK profile, manifest, `Sc64Activity` and haptics JNI helper.
 - `cmake/`: shared shell build (`shell.cmake`) and cross toolchain files.
-- `tools/{research,recompile,renderer,desktop,input,android}/`: authored analysis,
-  dependency patches, builds and evidence checks. `tools/research_libultra/`
+- `tools/sc64.py` (cross-platform command entry point, ADR-082) and `tools/hostenv.py`
+  (host detection and tool discovery); `tools/{research,recompile,renderer,desktop,input,android}/`:
+  authored analysis, dependency patches, builds and evidence checks. `tools/research_libultra/`
   maintains the reference inventory; `tools/rom_info.py` analyzes ROM metadata.
 - `tests/`: synthetic Python regressions and `tests/native/` C++ fixtures.
 - `local/`: ignored dependencies, generated code, build trees, reports and storage.
@@ -116,10 +117,14 @@ host/shell runtime copies instead of relying on unexplained local edits.
 
 ## Build and verification
 
-Run from the repository root. Build scripts require a macOS arm64 host and
-prepared private game/runtime inputs. Windows x86_64 is cross-built with Homebrew
-mingw-w64, Linux x86_64 in a local Docker image; Android delivery is arm64-v8a,
-API 28+.
+Run from the repository root. The Make targets forward to `python tools/sc64.py
+<command>`, which also runs on Linux and Windows (`doctor` lists missing tools).
+Builds need prepared private game/runtime inputs. `build` makes the package of
+the host: the macOS arm64 app, a Linux x86_64 package (host compiler; Docker
+elsewhere or with `DOCKER=1`) or, from an MSYS2 MINGW64 shell, the Windows x86_64
+package. Windows is also cross-built with mingw-w64 from macOS/Linux; Android
+delivery is arm64-v8a, API 28+. Only macOS arm64 is verified as a build host
+(D-057).
 
 ```sh
 make help

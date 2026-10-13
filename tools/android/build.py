@@ -19,16 +19,14 @@ from game_validation import validate_ui_hooks
 import check_apk
 from icon import installed as installed_icon
 sys.path.insert(0, str(ROOT / 'tools'))
+import hostenv
 from rom_info import normalize_rom
+sys.path.insert(0, str(ROOT / 'tools/android'))
+from pins import API, BUILD_TOOLS, SDK_REVISION, TARGET_API
 
-SDK_REVISION = '29.0.14206865'
-BUILD_TOOLS = '36.0.0'
-API = 28
-TARGET_API = 36
 # Above every installed build of the former engine package (versionCode 1).
 VERSION_CODE = 2
 VERSION_NAME = '2.0'
-JDK = Path('/opt/homebrew/opt/openjdk@21')
 RUNTIME = ROOT / 'local/deps/N64ModernRuntime-shell'
 SDL_JAVA = bootstrap.SDL_DIR / 'android-project/app/src/main/java'
 # Vulkan is the packaged default (verified on the physical phone). SDL 3.4.18's
@@ -77,7 +75,7 @@ def write_icon(path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--sdk', type=Path, default=Path.home() / 'Library/Android/sdk')
+    parser.add_argument('--sdk', type=Path, help='Android SDK root (default: ANDROID_SDK, ANDROID_HOME, ANDROID_SDK_ROOT or the IDE location)')
     parser.add_argument('--configure-only', action='store_true')
     parser.add_argument('--jobs', type=int, default=8)
     parser.add_argument('--build-type', choices=bootstrap.BUILD_TYPES, default=bootstrap.DEFAULT_BUILD_TYPE,
@@ -95,13 +93,27 @@ def main() -> None:
         _, bundled_rom = normalize_rom(args.bundle_rom.read_bytes())
         check_apk.validate_bundled_rom(bundled_rom)
     validate_ui_hooks(ROOT / 'local/generated/game')
-    android_sdk = args.sdk.resolve()
+    host = hostenv.current()
+    android_sdk = args.sdk.resolve() if args.sdk else hostenv.android_sdk(host)
+    if android_sdk is None:
+        raise SystemExit('Android SDK not found: pass --sdk or set ANDROID_SDK (see `sc64.py doctor`)')
+    jdk = hostenv.jdk_home(host)
+    if jdk is None:
+        raise SystemExit(f'JDK {hostenv.MIN_JDK}+ not found: set JAVA_HOME (see `sc64.py doctor`)')
     ndk = android_sdk / 'ndk' / SDK_REVISION
-    if f'Pkg.Revision = {SDK_REVISION}' not in (ndk / 'source.properties').read_text():
+    properties = ndk / 'source.properties'
+    if not properties.is_file():
+        raise SystemExit(f'NDK {SDK_REVISION} not found at {ndk}: sdkmanager "ndk;{SDK_REVISION}"')
+    if f'Pkg.Revision = {SDK_REVISION}' not in properties.read_text():
         raise ValueError('NDK pin mismatch')
-    ndk_bin = ndk / 'toolchains/llvm/prebuilt/darwin-x86_64/bin'
+    ndk_bin = ndk / 'toolchains/llvm/prebuilt' / host.ndk_tag / 'bin'
     build_tools = android_sdk / 'build-tools' / BUILD_TOOLS
+    if not build_tools.is_dir():
+        raise SystemExit(f'Android build-tools {BUILD_TOOLS} not found: sdkmanager "build-tools;{BUILD_TOOLS}"')
     android_jar = android_sdk / f'platforms/android-{TARGET_API}/android.jar'
+    if not android_jar.is_file():
+        raise SystemExit(f'Android platform {TARGET_API} not found: sdkmanager "platforms;android-{TARGET_API}"')
+    exe, bat = host.exe_suffix, host.script_suffix
     bootstrap.main()
     patch_shell_runtime.prepare(ROOT / 'local/deps/N64ModernRuntime', RUNTIME)
     build = ROOT / 'local/build/android'
@@ -111,19 +123,19 @@ def main() -> None:
          f'-DCMAKE_BUILD_TYPE={args.build_type}'])
     if args.configure_only: return
     run(['cmake', '--build', build, '--target', 'sc64_app', '-j', str(args.jobs)])
-    java_env = dict(os.environ, JAVA_HOME=str(JDK))
+    java_env = dict(os.environ, JAVA_HOME=str(jdk))
     target, receipt = output_paths(args.render_driver, ROOT)
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.sc64-android-', dir=target.parent) as temporary:
         staging = Path(temporary)
         library = staging / 'libmain.so'
         shutil.copy2(build / 'libmain.so', library)
-        run([ndk_bin / 'llvm-strip', '--strip-debug', library])
+        run([ndk_bin / ('llvm-strip' + exe), '--strip-debug', library])
         # Manifest and launcher icon.
         write_icon(staging / 'res/mipmap-xxxhdpi/icon.png')
-        run([build_tools / 'aapt2', 'compile', '--dir', staging / 'res', '-o', staging / 'res.zip'])
+        run([build_tools / ('aapt2' + exe), 'compile', '--dir', staging / 'res', '-o', staging / 'res.zip'])
         base = staging / 'base.apk'
-        run([build_tools / 'aapt2', 'link', '-o', base, '-I', android_jar,
+        run([build_tools / ('aapt2' + exe), 'link', '-o', base, '-I', android_jar,
              '--manifest', ROOT / 'native/android/AndroidManifest.xml',
              '--min-sdk-version', str(API), '--target-sdk-version', str(TARGET_API),
              '--version-code', str(VERSION_CODE), '--version-name', VERSION_NAME,
@@ -133,12 +145,12 @@ def main() -> None:
         # SDL's Java activity layer from the same pinned release, plus ours.
         classes = staging / 'classes'; classes.mkdir()
         java_sources = sorted(SDL_JAVA.rglob('*.java')) + sorted((ROOT / 'native/android/java').rglob('*.java'))
-        run([JDK / 'bin/javac', '--release', '11', '-nowarn', '-classpath', android_jar, '-d', classes, *java_sources],
+        run([jdk / 'bin' / ('javac' + exe), '--release', '11', '-nowarn', '-classpath', android_jar, '-d', classes, *java_sources],
             env=java_env)
         jar = staging / 'shell.jar'
-        run([JDK / 'bin/jar', 'cf', jar, '-C', classes, '.'], env=java_env)
+        run([jdk / 'bin' / ('jar' + exe), 'cf', jar, '-C', classes, '.'], env=java_env)
         dex = staging / 'dex'; dex.mkdir()
-        run([build_tools / 'd8', '--min-api', str(API), '--lib', android_jar, '--output', dex, jar], env=java_env)
+        run([build_tools / ('d8' + bat), '--min-api', str(API), '--lib', android_jar, '--output', dex, jar], env=java_env)
         unsigned = staging / 'unsigned.apk'
         with ZipFile(base) as src, ZipFile(unsigned, 'w') as dst:
             for item in src.infolist():
@@ -155,20 +167,20 @@ def main() -> None:
             if bundled_rom is not None:
                 dst.writestr(check_apk.ROM_MEMBER, bundled_rom, compress_type=ZIP_DEFLATED)
         aligned = staging / 'aligned.apk'
-        run([build_tools / 'zipalign', '-f', '-P', '16', '4', unsigned, aligned])
+        run([build_tools / ('zipalign' + exe), '-f', '-P', '16', '4', unsigned, aligned])
         # Personal builds use a private debug key, never a distribution key.
         # Keep the existing key: a new one would force uninstalling app data.
         key = ROOT / 'local/private/android/debug.keystore'
         key.parent.mkdir(parents=True, exist_ok=True)
         if not key.exists():
-            run([JDK / 'bin/keytool', '-genkeypair', '-keystore', key, '-storepass', 'android',
+            run([jdk / 'bin' / ('keytool' + exe), '-genkeypair', '-keystore', key, '-storepass', 'android',
                  '-keypass', 'android', '-alias', 'androiddebugkey', '-dname', 'CN=SC64 Personal Debug',
                  '-keyalg', 'RSA', '-keysize', '2048', '-validity', '10000'], env=java_env)
         signed = staging / 'StarCraft64.apk'
-        run([build_tools / 'apksigner', 'sign', '--ks', key, '--ks-pass', 'pass:android',
+        run([build_tools / ('apksigner' + bat), 'sign', '--ks', key, '--ks-pass', 'pass:android',
              '--out', signed, aligned], env=java_env)
-        run([build_tools / 'apksigner', 'verify', signed], env=java_env)
-        run([build_tools / 'zipalign', '-c', '-P', '16', '4', signed])
+        run([build_tools / ('apksigner' + bat), 'verify', signed], env=java_env)
+        run([build_tools / ('zipalign' + exe), '-c', '-P', '16', '4', signed])
         report = {'schema': 2, 'profile': 'arm64-android', 'ndk': SDK_REVISION,
                   'api': API, 'target_api': TARGET_API, 'build_tools': BUILD_TOOLS,
                   'version_code': VERSION_CODE, 'render_driver': args.render_driver,

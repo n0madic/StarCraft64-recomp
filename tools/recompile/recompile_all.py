@@ -6,7 +6,9 @@ Chains the documented Stage 1 steps: patch and build N64Recomp, analyze the ROM
 (run_recompiler.py --replace) and validate the observers the shell build
 requires. The libultra inventory is a prepared input (see docs/libultra-inventory.md);
 it is verified, never rebuilt here. Run with the Python that has spimdisasm
-(the Makefile uses .venv/bin/python). All outputs stay under ignored local/.
+(`tools/sc64.py recompile` uses the project .venv; `sc64.py venv` creates it).
+The recompiler is built with LLVM when found (macOS Homebrew or LLVM_BIN), else
+with CC/CXX or the system compiler. All outputs stay under ignored local/.
 """
 from __future__ import annotations
 
@@ -21,6 +23,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import hostenv
 from private_paths import require_local_or
 from rom_info import NTSC_U_SHA1 as ROM_SHA1
 
@@ -29,9 +32,7 @@ TOOLS = Path(__file__).resolve().parent
 DEFAULT_INVENTORY = ROOT / "local/reports/libultra-resident/inventory.json"
 RECOMPILER_SOURCE = ROOT / "third_party/N64Recomp"
 RECOMPILER_BUILD = ROOT / "local/build/recompiler"
-RECOMPILER_BINARY = RECOMPILER_BUILD / "N64Recomp"
 DEFAULT_OUTPUT = ROOT / "local/generated/game"
-LLVM_BIN = Path("/opt/homebrew/opt/llvm/bin")
 
 log = logging.getLogger("recompile_all")
 
@@ -65,7 +66,7 @@ def check_inputs(rom: Path, inventory: Path) -> None:
         import spimdisasm  # noqa: F401
     except ImportError as error:
         raise PipelineError("spimdisasm is not importable by this Python; run via the project "
-                            "environment (make recompile uses .venv/bin/python)") from error
+                            "environment (`tools/sc64.py recompile` uses the project .venv; `tools/sc64.py venv` creates it)") from error
 
 
 def run(step: str, command: list[str | Path]) -> None:
@@ -73,6 +74,10 @@ def run(step: str, command: list[str | Path]) -> None:
     result = subprocess.run([str(part) for part in command], cwd=ROOT)
     if result.returncode:
         raise PipelineError(f"Step failed ({step}), exit status {result.returncode}")
+
+
+def recompiler_binary() -> Path:
+    return RECOMPILER_BUILD / ("N64Recomp" + hostenv.current().exe_suffix)
 
 
 def build_recompiler(jobs: int) -> None:
@@ -83,12 +88,13 @@ def build_recompiler(jobs: int) -> None:
     if not (RECOMPILER_BUILD / "CMakeCache.txt").is_file():
         flags = ["-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_CXX_FLAGS=-include cstdlib"]
         # Pinned Rabbitizer omits malloc/free declarations; the forced include avoids editing it.
-        if (LLVM_BIN / "clang").is_file():
-            flags += [f"-DCMAKE_C_COMPILER={LLVM_BIN / 'clang'}", f"-DCMAKE_CXX_COMPILER={LLVM_BIN / 'clang++'}"]
+        if llvm := hostenv.llvm_bin():
+            flags += [f"-DCMAKE_C_COMPILER={llvm / 'clang'}", f"-DCMAKE_CXX_COMPILER={llvm / 'clang++'}"]
         run("configure N64Recomp", ["cmake", "-S", RECOMPILER_SOURCE, "-B", RECOMPILER_BUILD, "-G", "Ninja", *flags])
     run("build N64Recomp", ["cmake", "--build", RECOMPILER_BUILD, "--target", "N64RecompCLI", "-j", str(jobs)])
-    if not RECOMPILER_BINARY.is_file():
-        raise PipelineError(f"Recompiler build did not produce {RECOMPILER_BINARY}")
+    binary = recompiler_binary()
+    if not binary.is_file():
+        raise PipelineError(f"Recompiler build did not produce {binary}")
 
 
 def main() -> None:
@@ -113,7 +119,7 @@ def main() -> None:
     run("add UI observers", [sys.executable, ROOT / "tools/input/add_ui_hooks.py",
                              "--rom", rom, "--config", analysis / "sc64.toml"])
     run("generate game C", [sys.executable, TOOLS / "run_recompiler.py", analysis / "sc64-ui.toml",
-                            "--recompiler", RECOMPILER_BINARY, "--output", output, "--replace"])
+                            "--recompiler", recompiler_binary(), "--output", output, "--replace"])
     run("validate observers", [sys.executable, ROOT / "tools/desktop/game_validation.py", output])
     log.info("PASS: %s ready for `make build`; analysis kept in %s", output, analysis)
 

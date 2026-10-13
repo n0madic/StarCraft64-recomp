@@ -12,9 +12,16 @@ name and are not reused for the shell.
 
 | Profile | Build host / method | Status |
 |---|---|---|
-| macOS arm64 | native, Homebrew LLVM | Gates below pass |
-| Windows x86_64 | cross, Homebrew mingw-w64 GCC, static | Builds; menu, audio under Wine 11.17; user acceptance D-054 |
-| Linux x86_64 | cross, local Docker image (`tools/desktop/linux-cross.Dockerfile`); tar.gz and AppImage (ADR-081) | Builds; user acceptance D-054 |
+| macOS arm64 | native, Homebrew LLVM (or `LLVM_BIN`) | Gates below pass |
+| Windows x86_64 | mingw-w64 GCC, static: cross on macOS (Homebrew) and Linux (apt), native in an MSYS2 MINGW64 shell | Builds from macOS; menu, audio under Wine 11.17; Windows-host build and user acceptance D-054/D-057 |
+| Linux x86_64 | host compiler on a Linux x86_64 machine, otherwise a local Docker image (`tools/desktop/linux-cross.Dockerfile`; `DOCKER=1` forces it); tar.gz and AppImage (ADR-081) | Docker build from macOS builds; host-compiler build D-057; user acceptance D-054 |
+
+`python tools/sc64.py build` picks the row of the machine it runs on. A macOS app
+bundle can only be built on macOS; Linux arm64 and Intel macOS have no native
+profile (`build-linux` / `build-windows` still work from them). A Linux package
+built with the host compiler links the glibc of the build machine, so it needs
+that glibc or newer on the target; the Docker image pins Debian trixie (glibc
+2.38) as a reproducible baseline.
 
 Android uses the same shell; see [android.md](android.md).
 
@@ -60,19 +67,27 @@ window; text scales uniformly.
 
 ## Prepare and build locally
 
-Prerequisites: accepted Stages 1/2 private inputs; macOS arm64; Homebrew LLVM,
-CMake, Ninja; Python 3.10+ with NumPy and Pillow. Cross builds additionally need
-Homebrew `mingw-w64` (Windows) or Docker (Linux). These commands do not upload
-generated game code.
+Prerequisites: accepted Stages 1/2 private inputs; CMake, Ninja; Python 3.10+ with
+NumPy and Pillow; a compiler for your host (macOS: Homebrew LLVM, Linux: g++ or
+clang++ plus the SDL development packages listed in `linux-cross.Dockerfile`,
+Windows: MSYS2 MINGW64 GCC). Cross targets additionally need mingw-w64 (Windows
+package from macOS/Linux) or Docker (Linux package from anywhere but a Linux
+x86_64 machine). `python tools/sc64.py doctor` checks all of this and prints the
+install command for what is missing. These commands do not upload generated game
+code.
 
 ```sh
 make bootstrap        # SDL3, stb_truetype, DejaVu fonts, miniaudio (pinned, hashed)
-make build            # local/dist/StarCraft64.app
+make build            # the package for the OS you run on: StarCraft64.app / -linux / -windows
+make build-macos      # the macOS arm64 app by name (fails on other hosts)
 make build-windows    # local/dist/StarCraft64-windows.zip
 make build-linux      # local/dist/StarCraft64-linux.tar.gz
 make build-appimage   # local/dist/StarCraft64-x86_64.AppImage (runs build-linux first)
 make test
 ```
+
+Each `make` target forwards to `python tools/sc64.py <command>` (same command
+names, e.g. `build-linux --docker`); use that form where `make` is unavailable.
 
 Bootstrap downloads only the pinned public archives, checks their hashes,
 refuses conflicting existing files, and extracts regular files only into ignored
@@ -84,7 +99,8 @@ own runtime copy and is excluded from shell builds.
 Outputs contain the executable, the DejaVu font and its license — **no ROM file**.
 `make icon ROM=/path/game.z64` first converts the original title art into
 `local/icons/` (ADR-076); builds then add the icon (macOS `.icns`, Windows
-resource, Linux `StarCraft64.png` beside the binary) and skip it when absent.
+resource, Linux `StarCraft64.png` beside the binary) and skip it when absent. The
+`.icns` is made with `iconutil`, so it exists only when icons are generated on macOS.
 New bundles/packages are staged completely before publication; a running
 executable is not truncated. Receipts: `local/reports/desktop/build.json`
 (schema 2), `local/reports/{windows,linux}/build.json` (schema 1).

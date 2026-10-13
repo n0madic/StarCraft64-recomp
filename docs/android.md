@@ -214,8 +214,17 @@ underflow calculation, not all game arithmetic/exception semantics (D-012).
 
 The root Makefile wraps these same scripts: `make build-android`,
 `make check-apk`, `make install-android SERIAL=DEVICE_SERIAL`, and
-`make run-android SERIAL=DEVICE_SERIAL`. `make build` / `make run` retain the
-macOS desktop path; `make test` runs the Python and native/Lua regressions.
+`make run-android SERIAL=DEVICE_SERIAL`; each is `python tools/sc64.py <same name>`
+(ADR-082), which runs on macOS, Linux and Windows. `make build` / `make run` use
+the desktop package of the host; `make test` runs the Python and native/Lua regressions.
+
+The APK build finds its tools through `tools/hostenv.py`: the SDK from `ANDROID_SDK`
+(`--sdk`), `ANDROID_HOME`, `ANDROID_SDK_ROOT` or the IDE location
+(`~/Library/Android/sdk`, `~/Android/Sdk`, `%LOCALAPPDATA%\Android\Sdk`); a JDK 21+
+from `JAVA_HOME`, Homebrew or `PATH`; the NDK LLVM prebuilt of the host
+(`darwin-`, `linux-` or `windows-x86_64`) and the `.exe`/`.bat` build-tools names on
+Windows. `python tools/sc64.py doctor` prints the exact `sdkmanager` commands for
+missing pieces. Only macOS arm64 has been used to build an APK (D-057).
 `make smoke-android SERIAL=DEVICE_SERIAL` restarts the imported game for a
 bounded Home/return check. See [development.md](development.md) for storage/report/tool overrides.
 

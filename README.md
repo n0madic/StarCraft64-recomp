@@ -35,11 +35,14 @@ and touch). See [project status](docs/project-status.md) for the detailed histor
 - A **StarCraft 64 (USA)** ROM dump. `z64`, `v64` and `n64` byte orders are accepted;
   the image must match SHA-1 `a36d91b5aac7bb95df0d7de5f9814f5270e25c2b` after
   normalization, otherwise the app refuses to start.
-- A build machine. The build scripts target **macOS on Apple Silicon** with
-  Homebrew LLVM, CMake, Ninja and Python 3.10+ (NumPy, Pillow). Windows and Linux
-  packages are cross-built from it (Homebrew `mingw-w64` and Docker respectively),
-  and the Android APK needs the Android SDK/NDK and OpenJDK 21. Exact versions are
-  listed in [desktop](docs/desktop.md) and [Android](docs/android.md).
+- A build machine: **macOS, Linux or Windows**, with CMake, Ninja and Python 3.10+
+  (NumPy, Pillow). The desktop package for your own machine needs a C++ compiler
+  (Homebrew LLVM on macOS, GCC or Clang on Linux, MSYS2 MINGW64 GCC on Windows).
+  Other desktop targets need `mingw-w64` (Windows package from macOS/Linux) or
+  Docker (Linux package from macOS, Windows or a non-x86_64 Linux machine), and the
+  Android APK needs the Android SDK/NDK and OpenJDK 21. `python tools/sc64.py
+  doctor` lists what your machine has and how to install the rest. Exact versions
+  are in [desktop](docs/desktop.md) and [Android](docs/android.md).
 
 ## Build and run
 
@@ -59,19 +62,28 @@ the C code and validates it, so the result is ready for `make build`. The ROM mu
 be in `z64` (big-endian) byte order. Before the first run, check out N64Recomp and
 N64ModernRuntime at the revisions pinned in
 [toolchain-sources](docs/toolchain-sources.md) into `third_party/`, create the
-project `.venv` with the pinned splat/spimdisasm, and prepare the libultra
+project `.venv` (`make venv`: the pinned spimdisasm/rabbitizer), and prepare the libultra
 inventory once ([libultra inventory](docs/libultra-inventory.md)); the command
 verifies the inventory but does not build it. The individual steps are described
 in [the recompilation tools](tools/recompile/README.md) and the
 [native runtime guide](docs/native-runtime.md).
 
-**2. Build and start the desktop app (macOS).**
+**2. Build and start the desktop app.**
 
 ```sh
+make doctor                         # which tools this machine has / lacks
 make bootstrap                      # fetch pinned public dependencies (SDL3, fonts, miniaudio)
-make build                          # local/dist/StarCraft64.app
+make build                          # the package for the OS you run on, see below
+make build-macos                    # explicitly: the macOS arm64 app (macOS only)
 make run ROM="/path/to/your.z64"
 ```
+
+`make build` produces `local/dist/StarCraft64.app` on macOS,
+`local/dist/StarCraft64-linux/` on Linux x86_64 and `local/dist/StarCraft64-windows/`
+on Windows. Every `make` target is a wrapper over `python tools/sc64.py <command>`,
+which runs unchanged on all three systems, so a Windows machine without `make` uses
+the same commands (`python tools\sc64.py build`, `... run --rom C:\path\game.z64`).
+On Windows run it from an MSYS2 MINGW64 shell with the MINGW64 Python.
 
 Without `ROM=`, click the window (or press `O`) to pick your ROM; it is copied
 into the app's private storage and reused on later launches.
@@ -79,8 +91,8 @@ into the app's private storage and reused on later launches.
 **3. Other platforms.**
 
 ```sh
-make build-windows                  # local/dist/StarCraft64-windows.zip
-make build-linux                    # local/dist/StarCraft64-linux.tar.gz
+make build-windows                  # local/dist/StarCraft64-windows.zip (mingw-w64)
+make build-linux                    # local/dist/StarCraft64-linux.tar.gz (DOCKER=1 forces Docker)
 make build-appimage                 # local/dist/StarCraft64-x86_64.AppImage (builds Linux first)
 
 make build-android                  # local/dist/StarCraft64-android.apk

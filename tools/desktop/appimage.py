@@ -5,8 +5,9 @@ The input is the package that `cross_build.py linux` staged under local/dist and
 its receipt, so the AppImage always wraps an audited binary. `--bundle-rom` adds
 the verified NTSC-U ROM beside the executable; the app then starts from it
 without creating another ROM copy. The squashfs image is built inside the local
-Linux cross image (no registry push, no remote build) and joined with the pinned
-type2 runtime, which is how `appimagetool` assembles an AppImage.
+Linux cross image (no registry push, no remote build) or, on a Linux host that has
+squashfs-tools, with the local ones, and joined with the pinned type2 runtime,
+which is how `appimagetool` assembles an AppImage.
 """
 from __future__ import annotations
 import argparse
@@ -23,7 +24,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools'))
 sys.path.insert(0, str(ROOT / 'tools/desktop'))
 import bootstrap
-from cross_build import audit, docker_image, in_container, run, sha256
+import hostenv
+from cross_build import Runner, audit, docker_image, sha256
 from private_paths import require_local
 from rom_info import NTSC_U_SHA1, load_ntsc_u
 
@@ -58,7 +60,7 @@ def desktop_entry(with_icon: bool) -> str:
 def check_package(package: Path, receipt: Path) -> dict[str, str]:
     """Require the staged package to be exactly what the Linux build receipt recorded."""
     if not receipt.is_file() or not package.is_dir():
-        raise ValueError('Run `make build-linux` first: the Linux package or its receipt is missing')
+        raise ValueError('Run `sc64.py build-linux` (make build-linux) first: the Linux package or its receipt is missing')
     actual = audit(sorted(package.iterdir()))
     if actual != json.loads(receipt.read_text())['files_sha256']:
         raise ValueError('The Linux package differs from its build receipt; rebuild it with `make build-linux`')
@@ -120,14 +122,19 @@ def join_image(runtime: Path, squashfs: Path, output: Path) -> int:
             raise ValueError('AppImage file system does not start at the runtime boundary')
     return offset
 
-def mksquashfs(image: str, appdir: Path, output: Path) -> None:
-    run(in_container(image, ['mksquashfs', str(appdir), str(output), '-noappend', '-root-owned', '-no-xattrs',
-                              '-comp', 'zstd', '-Xcompression-level', '19', '-all-time', '0', '-mkfs-time', '0',
-                              '-quiet']))
+def squashfs_tools(host: hostenv.Host, force_docker: bool) -> Runner:
+    """Where squashfs-tools run: locally when a Linux host has them, else in the cross image."""
+    if host.system == 'linux' and not force_docker and hostenv.find_tool('mksquashfs') and hostenv.find_tool('unsquashfs'):
+        return Runner(host)
+    return Runner(host, docker_image(host))
 
-def extract_and_audit(image: str, appimage: Path, offset: int, destination: Path, rom: bytes | None) -> dict[str, str]:
+def mksquashfs(tools: Runner, appdir: Path, output: Path) -> None:
+    tools.run(['mksquashfs', appdir, output, '-noappend', '-root-owned', '-no-xattrs',
+               '-comp', 'zstd', '-Xcompression-level', '19', '-all-time', '0', '-mkfs-time', '0', '-quiet'])
+
+def extract_and_audit(tools: Runner, appimage: Path, offset: int, destination: Path, rom: bytes | None) -> dict[str, str]:
     """Unpack the finished artifact and audit what a user would actually receive."""
-    run(in_container(image, ['unsquashfs', '-no-progress', '-o', str(offset), '-d', str(destination), str(appimage)]))
+    tools.run(['unsquashfs', '-no-progress', '-o', str(offset), '-d', destination, appimage])
     for required in ('AppRun', 'StarCraft64.desktop', f'usr/bin/{BINARY}'):
         if not (destination / required).is_file():
             raise ValueError(f'AppImage lacks {required}')
@@ -136,6 +143,7 @@ def extract_and_audit(image: str, appimage: Path, offset: int, destination: Path
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bundle-rom', type=Path, help='Pack this NTSC-U dump beside the executable (personal use only)')
+    parser.add_argument('--docker', action='store_true', help='Run squashfs-tools in the Docker image even if installed locally')
     args = parser.parse_args()
     rom = None
     if args.bundle_rom:
@@ -144,23 +152,23 @@ def main() -> None:
     bootstrap.fetch(bootstrap.APPIMAGE_RUNTIME, bootstrap.APPIMAGE_RUNTIME_URL, bootstrap.APPIMAGE_RUNTIME_SHA256)
     dist = require_local(ROOT / 'local/dist')
     output = dist / ('StarCraft64-x86_64-bundled-rom.AppImage' if rom else 'StarCraft64-x86_64.AppImage')
-    image = docker_image()
+    tools = squashfs_tools(hostenv.current(), args.docker)
     with tempfile.TemporaryDirectory(prefix='.sc64-appimage-', dir=dist) as temporary:
         work = Path(temporary)
         appdir = work / 'AppDir'
         stage_appdir(appdir, PACKAGE, rom)
         staged = audit_appdir(appdir, rom)
         squashfs = work / 'AppDir.squashfs'
-        mksquashfs(image, appdir, squashfs)
+        mksquashfs(tools, appdir, squashfs)
         built = work / output.name
         offset = join_image(bootstrap.APPIMAGE_RUNTIME, squashfs, built)
-        if extract_and_audit(image, built, offset, work / 'extracted', rom) != staged:
+        if extract_and_audit(tools, built, offset, work / 'extracted', rom) != staged:
             raise ValueError('The packed AppImage differs from the staged AppDir')
         receipt = {'schema': 1, 'profile': 'x86_64-linux-appimage', 'cloud_upload': False,
                    'linux_binary_sha256': files[BINARY], 'files_sha256': staged,
                    'runtime_tag': bootstrap.APPIMAGE_RUNTIME_TAG, 'runtime_sha256': sha256(bootstrap.APPIMAGE_RUNTIME),
                    'squashfs_offset': offset, 'rom_included': rom is not None,
-                   'rom_sha1': NTSC_U_SHA1 if rom is not None else None,
+                   'rom_sha1': NTSC_U_SHA1 if rom is not None else None, 'squashfs_tools': 'docker' if tools.image else 'local',
                    'appimage_sha256': sha256(built), 'user_acceptance': False}
         # Publish only the complete artifact; a running AppImage is not truncated.
         os.replace(built, output)

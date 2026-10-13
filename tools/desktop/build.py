@@ -1,25 +1,31 @@
 #!/usr/bin/env python3
-"""Build the personal arm64 macOS SDL3 application locally, without any upload."""
+"""Build the personal arm64 macOS SDL3 application locally, without any upload.
+
+On Linux and Windows hosts only ``--configure-only`` is available here: it
+configures the host-compiler tree that the native tests use. Their packages come
+from cross_build.py (``tools/sc64.py build`` picks the right tool).
+"""
 from __future__ import annotations
 import argparse
 import hashlib
 import json
 import os
-import platform
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 import bootstrap
 import patch_shell_runtime
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import hostenv
 from bootstrap import FONT, FONT_LICENSE, MINIAUDIO, MINIAUDIO_VERSION, SDL_ARCHIVE, SDL_VERSION, STB_TRUETYPE
 from game_validation import validate_ui_hooks
 from icon import installed as installed_icon
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / 'local/deps/N64ModernRuntime-shell'
-LLVM_BIN = Path('/opt/homebrew/opt/llvm/bin')
 MACOS_DEPLOYMENT_TARGET = '13.0'
 
 BACKUP_PREFIX = '.sc64-build-'
@@ -62,19 +68,25 @@ def main() -> None:
     parser.add_argument('--build-type', choices=bootstrap.BUILD_TYPES, default=bootstrap.DEFAULT_BUILD_TYPE,
                         help='CMake build type (default: %(default)s)')
     args = parser.parse_args()
-    if platform.system() != 'Darwin' or platform.machine() != 'arm64':
-        raise SystemExit('This tool builds the macOS arm64 profile; see tools/windows and tools/linux')
+    host = hostenv.current()
+    if host.system == 'darwin' and host.arch != 'arm64':
+        raise SystemExit('The macOS profile is arm64 only')
+    if host.system != 'darwin' and not args.configure_only:
+        raise SystemExit(f'No app bundle exists for {host.label}; build its package with '
+                         '`python tools/sc64.py build` (Linux/Windows: tools/desktop/cross_build.py)')
     validate_ui_hooks(ROOT / 'local/generated/game')
-    if not (LLVM_BIN / 'clang++').is_file():
-        raise SystemExit(f'Homebrew LLVM is required: {LLVM_BIN}/clang++ not found (brew install llvm)')
+    configure = ['-DSC64_BUILD_SHELL=ON', '-DSC64_RUNTIME_DIR=' + str(RUNTIME), f'-DCMAKE_BUILD_TYPE={args.build_type}']
+    if host.system == 'darwin':
+        llvm = hostenv.llvm_bin()
+        if llvm is None:
+            raise SystemExit('LLVM is required: set LLVM_BIN or install it (brew install llvm)')
+        configure += [f'-DCMAKE_CXX_COMPILER={llvm / "clang++"}', f'-DCMAKE_C_COMPILER={llvm / "clang"}',
+                      f'-DCMAKE_OSX_DEPLOYMENT_TARGET={MACOS_DEPLOYMENT_TARGET}']
+    # Other hosts compile with CC/CXX or the system compiler.
     bootstrap.main()
     patch_shell_runtime.prepare(ROOT / 'local/deps/N64ModernRuntime', RUNTIME)
     build = ROOT / 'local/build/desktop'
-    run(['cmake', '-S', str(ROOT), '-B', str(build), '-G', 'Ninja',
-         '-DSC64_BUILD_SHELL=ON', '-DSC64_RUNTIME_DIR=' + str(RUNTIME),
-         f'-DCMAKE_CXX_COMPILER={LLVM_BIN / "clang++"}',
-         f'-DCMAKE_C_COMPILER={LLVM_BIN / "clang"}',
-         f'-DCMAKE_OSX_DEPLOYMENT_TARGET={MACOS_DEPLOYMENT_TARGET}', f'-DCMAKE_BUILD_TYPE={args.build_type}'])
+    run(['cmake', '-S', str(ROOT), '-B', str(build), '-G', 'Ninja', *configure])
     if args.configure_only:
         return
     run(['cmake', '--build', str(build), '--target', 'sc64_app', '-j', str(args.jobs)])
@@ -97,7 +109,7 @@ def main() -> None:
         if (staged / 'Contents/Resources/StarCraft64.icns').exists():
             plist['CFBundleIconFile'] = 'StarCraft64'
         (staged / 'Contents/Info.plist').write_bytes(plistlib.dumps(plist))
-        build_receipt = {'schema': 2, 'profile': 'arm64-macos', 'build_type': args.build_type, 'cloud_upload': False,
+        build_receipt = {'schema': 2, 'profile': 'arm64-macos', 'host': host.label, 'build_type': args.build_type, 'cloud_upload': False,
             'binary_sha256': sha256(staged / 'Contents/MacOS/SC64'),
             'sdl3_version': SDL_VERSION, 'sdl3_sha256': sha256(SDL_ARCHIVE),
             'miniaudio_version': MINIAUDIO_VERSION, 'miniaudio_sha256': sha256(MINIAUDIO),

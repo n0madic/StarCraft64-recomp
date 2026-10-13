@@ -341,7 +341,8 @@ class LaunchReceiptTests(unittest.TestCase):
             def process(*args, **kwargs):
                 if mutation: mutation(resources)
                 return subprocess.CompletedProcess([], 0)
-            with mock_patch.object(launcher, 'ROOT', root), mock_patch.object(launcher.subprocess, 'run', process), mock_patch.object(sys, 'argv', ['run', '--output', str(output)]), redirect_stdout(io.StringIO()):
+            host = launcher.hostenv.Host('darwin', 'arm64')
+            with mock_patch.object(launcher, 'ROOT', root), mock_patch.object(launcher.hostenv, 'current', return_value=host), mock_patch.object(launcher.subprocess, 'run', process), mock_patch.object(sys, 'argv', ['run', '--output', str(output)]), redirect_stdout(io.StringIO()):
                 with self.assertRaises(SystemExit) as error: launcher.main()
             return error.exception.code, json.loads((output / 'run.json').read_text())
 
@@ -363,6 +364,64 @@ class LaunchReceiptTests(unittest.TestCase):
                 self.assertEqual(report['exit_code'], 0)
                 self.assertTrue(report['binary_unchanged'])
                 self.assertFalse(report['resources_unchanged'])
+
+class PackageLaunchTests(unittest.TestCase):
+    """Linux and Windows packages launch under the same receipt binding as the macOS bundle."""
+    def launch(self, host, name, mutation=None):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            package = root / f'local/dist/StarCraft64-{host.system}'
+            package.mkdir(parents=True)
+            binary = package / name
+            binary.write_bytes(b'binary')
+            (package / 'DejaVuSansMono-Bold.ttf').write_bytes(b'font')
+            files = launcher.resource_hashes(package)
+            receipt = root / f'local/reports/{host.system}/build.json'
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text(json.dumps({'schema': 1, 'binary_sha256': launcher.sha256(binary), 'files_sha256': files}))
+            output = root / 'local/run'
+            commands = []
+            def process(command, *args, **kwargs):
+                commands.append(command)
+                if mutation: mutation(package)
+                return subprocess.CompletedProcess([], 0)
+            with mock_patch.object(launcher, 'ROOT', root), mock_patch.object(launcher.hostenv, 'current', return_value=host), mock_patch.object(launcher.subprocess, 'run', process), mock_patch.object(sys, 'argv', ['run', '--output', str(output)]), redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as error: launcher.main()
+            return error.exception.code, commands, package
+
+    def test_linux_and_windows_packages_run_their_own_binary(self):
+        for host, name in ((launcher.hostenv.Host('linux', 'x86_64'), 'StarCraft64'),
+                           (launcher.hostenv.Host('windows', 'x86_64'), 'StarCraft64.exe')):
+            with self.subTest(host=host.label):
+                code, commands, package = self.launch(host, name)
+                self.assertEqual(code, 0)
+                self.assertEqual(commands[0][0], str(package / name))
+
+    def test_package_edit_is_rejected_before_launch(self):
+        host = launcher.hostenv.Host('linux', 'x86_64')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            package = root / 'local/dist/StarCraft64-linux'
+            package.mkdir(parents=True)
+            (package / 'StarCraft64').write_bytes(b'binary')
+            receipt = root / 'local/reports/linux/build.json'
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text(json.dumps({'schema': 1, 'binary_sha256': launcher.sha256(package / 'StarCraft64'),
+                                           'files_sha256': {'StarCraft64': launcher.sha256(package / 'StarCraft64')}}))
+            (package / 'extra.ttf').write_bytes(b'added')
+            with mock_patch.object(launcher, 'ROOT', root), mock_patch.object(launcher.hostenv, 'current', return_value=host), \
+                    mock_patch.object(sys, 'argv', ['run', '--output', str(root / 'local/run')]):
+                with self.assertRaisesRegex(SystemExit, 'resources differ'): launcher.main()
+
+    def test_missing_build_and_unsupported_host(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            for host, message in ((launcher.hostenv.Host('linux', 'x86_64'), 'No build for this host'),
+                                  (launcher.hostenv.Host('linux', 'arm64'), 'natively')):
+                with self.subTest(host=host.label), mock_patch.object(launcher, 'ROOT', root), \
+                        mock_patch.object(launcher.hostenv, 'current', return_value=host), \
+                        mock_patch.object(sys, 'argv', ['run', '--output', str(root / 'local/run')]):
+                    with self.assertRaisesRegex(SystemExit, message): launcher.main()
 
 class PublishBundleTest(unittest.TestCase):
     def tree(self, root, marker):

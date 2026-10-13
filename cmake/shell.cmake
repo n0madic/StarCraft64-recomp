@@ -60,7 +60,10 @@ if(ANDROID)
         -Wl,-z,common-page-size=16384)
 else()
     add_executable(sc64_app "${SC64_ROOT}/native/shell/app.cpp")
-    if(CMAKE_CROSSCOMPILING)
+    # Shipped packages (tools/desktop/cross_build.py) must not bake in the build tree path,
+    # whether they are cross-compiled or built natively on a matching host.
+    option(SC64_PACKAGED_BUILD "Build a relocatable package: private root is a relative local/" OFF)
+    if(CMAKE_CROSSCOMPILING OR SC64_PACKAGED_BUILD)
         # Diagnostic outputs stay below a local/ directory beside the run.
         target_compile_definitions(sc64_shell PRIVATE SC64_PRIVATE_ROOT="local")
     else()

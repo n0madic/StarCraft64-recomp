@@ -7,11 +7,32 @@ import json
 import subprocess
 import time
 from pathlib import Path
+from typing import NamedTuple
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import hostenv
 from private_paths import require_local_or
 
 ROOT = Path(__file__).resolve().parents[2]
+
+class Launch(NamedTuple):
+    """Where the host's own build lives and which receipt entries bind it."""
+    binary: Path
+    resources: Path
+    receipt: Path
+    schema: int
+    resources_key: str
+
+def locate(host: hostenv.Host, root: Path = ROOT) -> Launch:
+    if host.system == 'darwin':
+        app = root / 'local/dist/StarCraft64.app/Contents'
+        return Launch(app / 'MacOS/SC64', app / 'Resources', root / 'local/reports/desktop/build.json',
+                      2, 'resources_sha256')
+    if host.arch == 'x86_64' and host.system in ('linux', 'windows'):
+        package = root / f'local/dist/StarCraft64-{host.system}'
+        return Launch(package / ('StarCraft64' + host.exe_suffix), package,
+                      root / f'local/reports/{host.system}/build.json', 1, 'files_sha256')
+    raise SystemExit(f'No desktop package runs natively on {host.label}')
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -62,15 +83,17 @@ def main() -> None:
         raise SystemExit('GPU fixture probe and live guest execution are separate runs')
     if args.background_input_probe and (not args.inputs or args.seconds <= 0 or args.pause_at or args.resume_at):
         raise SystemExit('Background input probe requires a timed recipe without lifecycle probes')
-    app = ROOT / 'local/dist/StarCraft64.app/Contents'
-    binary = app / 'MacOS/SC64'
-    receipt = json.loads((ROOT / 'local/reports/desktop/build.json').read_text())
-    if receipt.get('schema') != 2:
+    launch = locate(hostenv.current(), ROOT)
+    binary = launch.binary
+    if not launch.receipt.is_file() or not binary.is_file():
+        raise SystemExit('No build for this host; run `python tools/sc64.py build` first')
+    receipt = json.loads(launch.receipt.read_text())
+    if receipt.get('schema') != launch.schema:
         raise SystemExit('Build receipt predates the SDL3 shell; rebuild first')
     if sha256(binary) != receipt['binary_sha256']:
         raise SystemExit('Bundle differs from the build receipt; rebuild first')
-    expected_resources = receipt.get('resources_sha256', {})
-    if not resources_match(app / 'Resources', expected_resources):
+    expected_resources = receipt.get(launch.resources_key, {})
+    if not resources_match(launch.resources, expected_resources):
         raise SystemExit('Bundled resources differ from the build receipt; rebuild first')
     command = [str(binary), f'--config=sc64.storage={storage}',
                f'--config=sc64.seconds={args.seconds}', f'--config=sc64.pause_at={args.pause_at}',
@@ -106,7 +129,7 @@ def main() -> None:
         binary_unchanged = sha256(binary) == receipt['binary_sha256']
     except OSError:
         binary_unchanged = False
-    resources_unchanged = resources_match(app / 'Resources', expected_resources)
+    resources_unchanged = resources_match(launch.resources, expected_resources)
     report.update({'elapsed_seconds': time.monotonic() - started, 'exit_code': result.returncode,
                    'binary_unchanged': binary_unchanged,
                    'resources_unchanged': resources_unchanged,

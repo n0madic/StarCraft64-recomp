@@ -6,11 +6,14 @@ project status is in [project-status.md](project-status.md).
 
 ## Build, run and device workflow
 
-The personal build scripts require a **macOS arm64 build host** and the
+The personal build scripts run on **macOS, Linux or Windows** and need the
 private generated game/runtime prepared by [Stage 1](native-runtime.md) and
-[Stage 4](input.md). Windows x86_64 is cross-built with Homebrew mingw-w64,
-Linux x86_64 in a local Docker image. See [desktop prerequisites](desktop.md)
-and [Android toolchain pins](android.md). They never upload game code.
+[Stage 4](input.md). `python tools/sc64.py <command>` is the single entry point on
+every system (ADR-082); the Makefile only forwards to it, so a machine without
+`make` runs the same commands. `tools/hostenv.py` finds the host's tools (LLVM,
+mingw-w64, Docker); `sc64.py doctor` reports what is missing and how to install it.
+Which package a host builds is in the [desktop matrix](desktop.md). See also
+[Android toolchain pins](android.md). They never upload game code.
 
 Build and run scripts live in `tools/desktop` and `tools/android`. Their working
 directories are `local/build/desktop` and `local/build/android`, with build
@@ -21,7 +24,8 @@ for the research, recompilation, renderer and input tools.
 
 ```sh
 make help
-make build
+make doctor                      # = python tools/sc64.py doctor
+make build                       # package for this host
 make run                         # click / O to choose your own ROM
 make run ROM="/path/to/your.z64"   # or provide it explicitly
 make test
@@ -30,6 +34,9 @@ make build-windows               # local/dist/StarCraft64-windows.zip
 make build-linux                 # local/dist/StarCraft64-linux.tar.gz
 make build-appimage              # local/dist/StarCraft64-x86_64.AppImage
 
+make venv                        # once: .venv for `make recompile`
+make recompile ROM="/path/to/your.z64"
+
 make build-android
 make check-apk
 make devices
@@ -37,7 +44,8 @@ make install-android SERIAL=DEVICE_SERIAL
 make run-android SERIAL=DEVICE_SERIAL
 ```
 
-Desktop output is `local/dist/StarCraft64.app`; Android output is
+Desktop output is `local/dist/StarCraft64.app` on macOS, `StarCraft64-linux/` on
+Linux x86_64 and `StarCraft64-windows/` on Windows; Android output is
 `local/dist/StarCraft64-android.apk`. On Android, tap the start screen to import
 your own ROM through the system picker; later launches reuse its private copy.
 Android requires arm64-v8a and API 28 or newer. Build before the first launch;

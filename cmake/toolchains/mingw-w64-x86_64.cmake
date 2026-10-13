@@ -1,6 +1,7 @@
-# Cross-compile the Windows x86_64 shell on the macOS host with Homebrew
-# mingw-w64 (GCC). The executable is linked statically, so it needs no MinGW
-# runtime DLLs on the target machine.
+# Build the Windows x86_64 shell with mingw-w64 (GCC): cross-compiled on macOS
+# (Homebrew) or Linux (apt), natively on Windows from an MSYS2 MINGW64 shell.
+# The executable is linked statically, so it needs no MinGW runtime DLLs on the
+# target machine.
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
 set(SC64_MINGW_PREFIX "x86_64-w64-mingw32" CACHE STRING "mingw-w64 tool prefix")

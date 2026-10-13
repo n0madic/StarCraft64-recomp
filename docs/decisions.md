@@ -1967,3 +1967,46 @@ from the package, reached the main menu and wrote only the save to storage.
 The AppImage file itself cannot run under QEMU binfmt (its ELF header carries the
 `AI` marker), and no real Linux desktop run exists (D-054). Flatpak and Snap are
 not provided.
+
+## ADR-082 — One cross-platform build pipeline driven by tools/sc64.py (ACCEPTED)
+
+**Context:** The build scripts assumed a macOS arm64 host: a hard `Darwin/arm64`
+check, `/opt/homebrew` LLVM/JDK paths, the macOS NDK prebuilt, `.app`-only launch
+and a Docker image fixed to `linux/arm64`. The Makefile is POSIX shell, and
+Windows has no `make`. A user on Linux or Windows could not follow the README.
+
+**Decision:** `python tools/sc64.py <command>` is the single entry point and runs
+on macOS, Linux and Windows; the Makefile only forwards to it. `tools/hostenv.py`
+detects the host and finds tools (environment override, then `PATH`, then known
+install locations) so no tool hard-codes a machine layout. `sc64.py build` makes
+the package of the machine it runs on: the `.app` on macOS (Homebrew LLVM or
+`LLVM_BIN`), the host-compiler package on Linux x86_64
+(`cmake/toolchains/linux-native-x86_64.cmake`, tree `local/build/linux-native`) and the
+mingw-w64 package on Windows from an MSYS2 MINGW64 shell. Explicit
+`build-windows` (mingw-w64 from macOS, Linux or Windows) and `build-linux` (Docker
+everywhere except Linux x86_64, or with `--docker`) work from any host. The Docker
+platform follows the host architecture, a Windows host mounts the repository at
+`/work`, and AppImage packing uses local squashfs-tools on Linux when present.
+Packaged builds define `SC64_PACKAGED_BUILD`, which keeps the private root relative
+(`local`) independently of whether CMake calls the build a cross compile. `run.py`
+launches the host's own package under the same receipt binding as the macOS bundle.
+`sc64.py doctor` reports missing tools with an install command per OS. Receipts
+gain `host` and `build_mode`. An app bundle is still built on macOS only.
+
+The same driver covers the Android APK (`hostenv` finds the SDK, a JDK 21+ and the
+host's NDK prebuilt; Windows uses the `.exe`/`.bat` build-tools names; pins live in
+`tools/android/pins.py`), the device commands (the emulator guard of
+`install-android` is Python, not shell), `venv`/`recompile` (project `.venv`
+per host layout, LLVM optional) and `benchmark-renderer`/`test-native`.
+
+**Consequences:** A host-compiler Linux package
+inherits the build machine's glibc floor, unlike the pinned Debian image. Verified
+here from macOS arm64: the macOS, Windows (mingw) and Linux (Docker) builds and the
+AppImage through the new driver, a macOS run with and without ROM, the Android
+APK build and audit (no device), the N64Recomp build step of `recompile`
+(the full chain stops at the missing libultra inventory), the linux/amd64
+Dockerfile, and synthetic tests of host detection, tool discovery, dispatch and
+path mapping. A full host-compiler Linux x86_64 build and a `run` with dummy SDL
+drivers succeeded inside a linux/amd64 Debian container (emulated, not real
+hardware; 600 guest fields, no errors). The Windows-host (MSYS2) and
+Windows-host Docker paths are not exercised on real Windows (D-057).

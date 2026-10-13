@@ -1,14 +1,17 @@
 # Personal builds require the private generated game under ignored local/.
-# Build scripts run on a macOS arm64 host; Windows/Linux are cross-compiled.
+# Desktop targets run through tools/sc64.py (macOS, Linux, Windows); on a host
+# without make, call `python tools/sc64.py <command>` directly. See `make doctor`.
 .DEFAULT_GOAL := help
 
 PYTHON ?= python3
-# Recompilation needs the splat/spimdisasm environment.
-RECOMP_PYTHON ?= .venv/bin/python
+# Recompilation needs spimdisasm: empty uses the project .venv (`make venv` creates it).
+RECOMP_PYTHON ?=
 ADB ?= adb
 JOBS ?= 8
 ROM ?=
 BUNDLE_ROM ?= 0
+# 1 builds the Linux package in the pinned Docker image even on a Linux x86_64 host.
+DOCKER ?= 0
 SERIAL ?=
 ANDROID_SDK ?=
 # Empty builds/uses the Vulkan APK; opengles2 selects the emulator variant (D-053).
@@ -26,29 +29,35 @@ ANDROID_DEBUGGABLE ?= 0
 BUILD_TYPE ?= Release
 BASELINE_REPLAY ?=
 RENDERER_MANIFEST ?= local/inputs/renderer/manifest.json
-RUN_ID := $(shell date +%Y%m%d-%H%M%S)
 
 ifneq ($(BUNDLE_ROM),0)
 ifneq ($(BUNDLE_ROM),1)
 $(error BUNDLE_ROM must be 0 or 1)
 endif
 endif
-export ROM BUNDLE_ROM SERIAL ANDROID_SDK APK STORAGE REPORT RUN_SECONDS SMOKE_SECONDS JOBS
+SC64 = $(PYTHON) tools/sc64.py
+DOCKER_FLAG = $(if $(filter 1,$(DOCKER)),--docker)
+export ROM BUNDLE_ROM RECOMP_PYTHON SERIAL ADB ANDROID_SDK APK STORAGE REPORT RUN_SECONDS SMOKE_SECONDS JOBS
 export BASELINE_REPLAY RENDERER_MANIFEST
-export PAGE_SIZE ANDROID_BACKEND ANDROID_DEBUGGABLE BUILD_TYPE
+export PAGE_SIZE ANDROID_BACKEND ANDROID_DEBUGGABLE ANDROID_RENDER_DRIVER BUILD_TYPE
 
-.PHONY: help bootstrap recompile build build-desktop configure-desktop run run-desktop build-windows build-linux build-appimage \
+# `make build-desktop`/`run-desktop`/`configure-desktop` are the older names of build/run/configure.
+.PHONY: help doctor venv bootstrap recompile build build-macos build-desktop configure-desktop run run-desktop build-windows build-linux build-appimage \
         build-android build-android-opengles icon configure-android check-apk devices install-android \
         run-android smoke-android audio-android benchmark-renderer test test-python test-native
 
 help:
 	@printf '%s\n' \
+	  'make venv                   Create .venv with the pinned recompilation packages (spimdisasm)' \
 	  'make recompile ROM="/path/game.z64"  Generate local/generated/game from the ROM (needs the libultra inventory)' \
-	  'make build / build-desktop   Build the personal macOS arm64 SDL3 app' \
+	  'make doctor                 Check which build tools this machine has for each target' \
+	  'make build / build-desktop   Build the package of the OS you run on (macOS app, Linux or Windows package)' \
+	  'make build-macos            Build the macOS arm64 app bundle (macOS hosts only)' \
 	  'make run / run-desktop       Launch it; ROM="/path/game.z64" is optional' \
-	  'make build-windows          Cross-build the Windows x86_64 zip (mingw-w64)' \
-	  'make build-linux            Cross-build the Linux x86_64 tar.gz (local Docker)' \
-	  'make build-appimage         Pack the Linux x86_64 AppImage from the fresh Linux build (local Docker)' \
+	  'make build-windows          Windows x86_64 zip (mingw-w64: cross on macOS/Linux, native in MSYS2 MINGW64)' \
+	  'make build-linux            Linux x86_64 tar.gz (host compiler on Linux x86_64, local Docker elsewhere)' \
+	  '  DOCKER=1 forces the pinned Docker image (reproducible glibc baseline) on a Linux x86_64 host' \
+	  'make build-appimage         Pack the Linux x86_64 AppImage from the fresh Linux build (local squashfs-tools or Docker)' \
 	  '  BUNDLE_ROM=1 ROM="/path/game.z64" packs the ROM and autostarts from it (personal use only)' \
 	  'make build-android          Build and audit the personal arm64 APK locally' \
 	  '  BUNDLE_ROM=1 ROM="/path/game.z64" includes ROM and autostarts from APK assets' \
@@ -71,114 +80,86 @@ help:
 	  'make test-native            Configure desktop, then run CTest checks' \
 	  'make bootstrap              Fetch pinned public SDL3/stb/DejaVu/miniaudio into local/toolchains' \
 	  'make configure-desktop / configure-android   Configure without packaging' \
-	  'Variables: PYTHON, ADB, JOBS, ANDROID_SDK, APK, STORAGE, REPORT, RENDERER_MANIFEST,' \
+	  'Variables: PYTHON, RECOMP_PYTHON, ADB, JOBS, ANDROID_SDK, APK, STORAGE, REPORT, RENDERER_MANIFEST, DOCKER,' \
 	  '           RUN_SECONDS (0 = interactive), SMOKE_SECONDS (default 30),' \
 	  '           PAGE_SIZE (0 = record only), ANDROID_BACKEND (empty = default)' \
 	  'ROM, generated game C and saves stay private; see docs/android.md.'
 
+doctor:
+	$(SC64) doctor
+
 bootstrap:
-	$(PYTHON) tools/desktop/bootstrap.py
+	$(SC64) bootstrap
 
 icon:
-	@test -n "$(ROM)" || { echo 'make icon requires ROM="/path/game.z64"' >&2; exit 2; }
-	$(PYTHON) tools/desktop/icon.py "$(ROM)"
+	$(SC64) icon
+
+venv:
+	$(SC64) venv
 
 recompile:
-	@test -n "$(ROM)" || { echo 'make recompile requires ROM="/path/game.z64"' >&2; exit 2; }
-	$(RECOMP_PYTHON) tools/recompile/recompile_all.py "$(ROM)" --jobs "$$JOBS"
+	$(SC64) recompile
 
+# `build` makes the package of the OS it runs on; build-macos/-windows/-linux name a target.
 build: build-desktop
 
 build-desktop:
-	$(PYTHON) tools/desktop/build.py --build-type "$$BUILD_TYPE"
+	$(SC64) build
+
+build-macos:
+	$(SC64) build-macos
 
 configure-desktop:
-	$(PYTHON) tools/desktop/build.py --build-type "$$BUILD_TYPE" --configure-only
+	$(SC64) configure
 
 run: run-desktop
 
 run-desktop:
-	@set --; if [ -n "$$ROM" ]; then set -- --rom "$$ROM"; fi; \
-	$(PYTHON) tools/desktop/run.py "$$@" --storage "$$STORAGE" \
-	  --seconds "$$RUN_SECONDS" --output "$${REPORT:-local/reports/make-desktop-$(RUN_ID)}"
+	$(SC64) run
 
 build-windows:
-	$(PYTHON) tools/desktop/cross_build.py windows --jobs "$$JOBS" --build-type "$$BUILD_TYPE"
+	$(SC64) build-windows
 
 build-linux:
-	$(PYTHON) tools/desktop/cross_build.py linux --jobs "$$JOBS" --build-type "$$BUILD_TYPE"
+	$(SC64) build-linux $(DOCKER_FLAG)
 
-build-appimage: build-linux
-	@set --; if [ "$$BUNDLE_ROM" = 1 ]; then \
-	  test -n "$$ROM" || { printf '%s\n' 'Set ROM to your dump when BUNDLE_ROM=1.' >&2; exit 2; }; \
-	  set -- --bundle-rom "$$ROM"; fi; \
-	$(PYTHON) tools/desktop/appimage.py "$$@"
+build-appimage:
+	$(SC64) build-appimage $(DOCKER_FLAG)
 
 build-android:
-	@set --; if [ -n "$$ANDROID_SDK" ]; then set -- --sdk "$$ANDROID_SDK"; fi; \
-	if [ "$$BUNDLE_ROM" = 1 ]; then \
-	  test -n "$$ROM" || { printf '%s\n' 'Set ROM to your dump when BUNDLE_ROM=1.' >&2; exit 2; }; \
-	  set -- "$$@" --bundle-rom "$$ROM"; fi; \
-	if [ -n "$$ANDROID_RENDER_DRIVER" ]; then set -- "$$@" --render-driver "$$ANDROID_RENDER_DRIVER"; fi; \
-	if [ "$$ANDROID_DEBUGGABLE" = 1 ]; then set -- "$$@" --debuggable; fi; \
-	$(PYTHON) tools/android/build.py "$$@" --jobs "$$JOBS" --build-type "$$BUILD_TYPE"
+	$(SC64) build-android
 
 build-android-opengles:
-	@$(MAKE) --no-print-directory build-android ANDROID_RENDER_DRIVER=opengles2
+	$(SC64) build-android-opengles
 
 configure-android:
-	@set --; if [ -n "$$ANDROID_SDK" ]; then set -- --sdk "$$ANDROID_SDK"; fi; \
-	$(PYTHON) tools/android/build.py "$$@" --jobs "$$JOBS" --build-type "$$BUILD_TYPE" --configure-only
+	$(SC64) configure-android
 
 check-apk:
-	@set --; if [ "$$BUNDLE_ROM" = 1 ]; then set -- --bundled-rom; fi; \
-	$(PYTHON) tools/android/check_apk.py "$$APK" "$$@"
+	$(SC64) check-apk
 
 devices:
-	$(ADB) devices -l
+	$(SC64) devices
 
-install-android: check-apk
-	@test -n "$$SERIAL" || { printf '%s\n' 'Set SERIAL to an explicit adb device ID.' >&2; exit 2; }
-	@case "$$SERIAL" in emulator-*) \
-	  unzip -p "$$APK" assets/sc64/config.ini | grep -q '^sc64.render_driver = opengles2$$' || \
-	  { printf '%s\n' 'The Vulkan APK crashes on emulators (D-053): make build-android-opengles, then install with ANDROID_RENDER_DRIVER=opengles2.' >&2; exit 2; };; esac
-	$(ADB) -s "$$SERIAL" install -r "$$APK"
+install-android:
+	$(SC64) install-android
 
 run-android:
-	@test -n "$$SERIAL" || { printf '%s\n' 'Set SERIAL to an explicit adb device ID.' >&2; exit 2; }
-	@set --; if [ -n "$$ANDROID_RENDER_DRIVER" ]; then \
-	  set -- --esa com.nomadic.sc64.ARGUMENTS "--config=sc64.render_driver=$$ANDROID_RENDER_DRIVER"; fi; \
-	$(ADB) -s "$$SERIAL" shell am start -n com.nomadic.sc64.personal/com.nomadic.sc64.Sc64Activity "$$@"
+	$(SC64) run-android
 
 smoke-android:
-	@test -n "$$SERIAL" || { printf '%s\n' 'Set SERIAL to an explicit adb device ID.' >&2; exit 2; }
-	@set --; if [ "$$BUNDLE_ROM" = 1 ]; then set -- --bundled-rom; fi; \
-	if [ "$$PAGE_SIZE" != 0 ]; then set -- "$$@" --required-page-size "$$PAGE_SIZE"; fi; \
-	if [ -n "$$ANDROID_BACKEND" ]; then set -- "$$@" --backend "$$ANDROID_BACKEND"; fi; \
-	$(PYTHON) tools/android/run.py "$$@" --adb "$(ADB)" --serial "$$SERIAL" --apk "$$APK" \
-	  --seconds "$$SMOKE_SECONDS" --home --output "$${REPORT:-local/reports/make-android-$(RUN_ID)}"
+	$(SC64) smoke-android
 
 audio-android:
-	@test -n "$$SERIAL" || { printf '%s\n' 'Set SERIAL to an explicit adb device ID.' >&2; exit 2; }
-	$(PYTHON) tools/android/audio_report.py --adb "$(ADB)" --serial "$$SERIAL" \
-	  --output "$${REPORT:-local/reports/make-audio-$(RUN_ID)}"
+	$(SC64) audio-android
 
 benchmark-renderer:
-	@test -n "$$BASELINE_REPLAY" || { printf '%s\n' 'Set BASELINE_REPLAY to a preserved baseline replay executable.' >&2; exit 2; }
-	cmake -S . -B local/build/renderer -G Ninja -DSC64_BUILD_HOST=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo
-	cmake --build local/build/renderer --target sc64_gfx_replay -j "$$JOBS"
-	$(PYTHON) tools/renderer/benchmark.py "$$RENDERER_MANIFEST" \
-	  "$${REPORT:-local/reports/make-renderer-benchmark-$(RUN_ID)}" \
-	  --baseline "$$BASELINE_REPLAY" --candidate local/build/renderer/native/gfx_core/sc64_gfx_replay
+	$(SC64) benchmark-renderer
 
 test: test-python test-native
 
 test-python:
-	$(PYTHON) -m unittest discover -s tests
+	$(SC64) test-python
 
-test-native: configure-desktop
-	cmake --build local/build/desktop --target sc64_desktop_bridge_test sc64_flash_test \
-	  sc64_vi_test sc64_ui_observers_test sc64_guest_fpu_test sc64_gfx_test sc64_rom_import_test \
-	  sc64_sha_test sc64_desktop_input_test sc64_touch_input_test sc64_gestures_test sc64_map_taps_test \
-	  sc64_hud_input_test sc64_hud_buttons_test sc64_menu_input_test sc64_haptics_test sc64_host_telemetry_test sc64_loop_watch_test -j "$$JOBS"
-	ctest --test-dir local/build/desktop --output-on-failure
+test-native:
+	$(SC64) test-native

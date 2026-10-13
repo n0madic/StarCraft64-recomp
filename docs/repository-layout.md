@@ -3,7 +3,8 @@
 Tools and working directories use purpose-based names: `research`, `recompile`,
 `renderer`, `desktop`, `input` and `android`. Build output lives under
 `local/build/host`, `local/build/renderer`, `local/build/desktop` and
-`local/build/android`, `local/build/windows` and `local/build/linux`; the SDL3
+`local/build/android`, `local/build/windows`, `local/build/linux` and (host-compiler
+Linux package) `local/build/linux-native`; the SDL3
 shell uses the guarded runtime copy `local/deps/N64ModernRuntime-shell`. Reports, captures and private storage use
 the same purpose names. Documentation and test filenames follow these names.
 
@@ -63,7 +64,7 @@ native/
     input/         # SDL-free pointer/controller adapters
   android/         # NDK profile, manifest, platform JNI, Java activity/haptics
 cmake/             # shell.cmake, toolchains/{mingw-w64,linux}-x86_64.cmake
-tools/             # research, recompile, renderer, desktop, input, android
+tools/             # sc64.py (command entry point), hostenv.py (host/tool discovery), research, recompile, renderer, desktop, input, android
 tests/             # Python tool tests; native/ C++ fixtures
 local/             # ignored: toolchains, deps, generated, build, dist, reports, private
 third_party/       # ignored pinned source checkouts
