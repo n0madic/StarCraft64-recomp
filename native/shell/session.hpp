@@ -126,11 +126,13 @@ private:
     std::mutex pause_mutex_;
     PauseSources pause_sources_;
     void apply_pause_locked();
-    void launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::path& storage, bool persist);
+    // `may_build` allows starting the first-run game build when the module is missing or out of date; the launch
+    // that follows a finished build passes false, so a module that still cannot be loaded is an error, not a rebuild.
+    void launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::path& storage, bool persist, bool may_build = true);
     void start_runtime(std::vector<std::uint8_t> rom, const std::filesystem::path& storage);
     bool launched_ = false;
 #if defined(SC64_HAS_SETUP)
-    struct PendingLaunch { std::vector<std::uint8_t> rom; std::filesystem::path storage; bool persist; };
+    struct PendingLaunch { std::filesystem::path storage; bool persist; };  // the ROM comes back with the finished build
     GameBuild build_;
     std::optional<PendingLaunch> pending_;
 #endif

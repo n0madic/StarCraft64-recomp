@@ -65,6 +65,8 @@ def run(args: list[str], **kwargs) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--configure-only', action='store_true')
+    parser.add_argument('--setup-only', action='store_true',
+                        help='configure a tree for sc64_setup alone (local/build/setup): no generated game code is needed or validated')
     parser.add_argument('--jobs', type=int, default=8)
     parser.add_argument('--build-type', choices=bootstrap.BUILD_TYPES, default=bootstrap.DEFAULT_BUILD_TYPE,
                         help='CMake build type (default: %(default)s)')
@@ -75,8 +77,11 @@ def main() -> None:
     if host.system != 'darwin' and not args.configure_only:
         raise SystemExit(f'No app bundle exists for {host.label}; build its package with '
                          '`python tools/sc64.py build` (Linux/Windows: tools/desktop/cross_build.py)')
-    validate_ui_hooks(ROOT / 'local/generated/game')
+    if not args.setup_only:
+        validate_ui_hooks(ROOT / 'local/generated/game')
     configure = ['-DSC64_BUILD_SHELL=ON', '-DSC64_RUNTIME_DIR=' + str(RUNTIME), f'-DCMAKE_BUILD_TYPE={args.build_type}']
+    if args.setup_only:
+        configure.append('-DSC64_BUILD_GAME_MODULE=OFF')
     if host.system == 'darwin':
         llvm = hostenv.llvm_bin()
         if llvm is None:
@@ -86,9 +91,9 @@ def main() -> None:
     # Other hosts compile with CC/CXX or the system compiler.
     bootstrap.main()
     patch_shell_runtime.prepare(ROOT / 'local/deps/N64ModernRuntime', RUNTIME)
-    build = ROOT / 'local/build/desktop'
+    build = ROOT / ('local/build/setup' if args.setup_only else 'local/build/desktop')
     run(['cmake', '-S', str(ROOT), '-B', str(build), '-G', 'Ninja', *configure])
-    if args.configure_only:
+    if args.configure_only or args.setup_only:
         return
     # sc64_app depends on the game module, so one target builds both.
     run(['cmake', '--build', str(build), '--target', 'sc64_app', '-j', str(args.jobs)])

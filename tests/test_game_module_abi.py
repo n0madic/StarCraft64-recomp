@@ -69,7 +69,7 @@ class BuildFlagTests(unittest.TestCase):
         staged = (ROOT / 'cmake/setup.cmake').read_text()
         for name in ('module_main.c', 'sc64_module.h', 'sc64_imports.def', 'recomp.h', 'sections.h'):
             self.assertIn(name, staged, name)
-        self.assertIn('"-I" + sources.module_dir', (ROOT / 'native/setup/toolchain.cpp').read_text())
+        self.assertIn('"-I" + path_utf8(sources.module_dir)', (ROOT / 'native/setup/toolchain.cpp').read_text())
 
 
 class ProbeTests(unittest.TestCase):

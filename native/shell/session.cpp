@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <cstdlib>
 #include <iomanip>
 #include <stdexcept>
 
@@ -86,16 +87,27 @@ void Session::load(const std::filesystem::path& path, const std::filesystem::pat
 void Session::load_bundled(std::vector<std::uint8_t> rom, const std::filesystem::path& storage) {
     launch_rom(std::move(rom), storage, false);
 }
-void Session::launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::path& storage, bool persist) {
+void Session::launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::path& storage, bool persist, bool may_build) {
     if (launched_) throw std::runtime_error("Runtime supports one session per process; restart to change ROM");
     runtime::validate_rom(rom, sha1);
+#if defined(SC64_HAS_SETUP)
+    // A launcher package builds the module in the game folder; one left by an older version of the
+    // application (its receipt no longer matches) is replaced the same way. A module chosen explicitly
+    // with $SC64_GAME_MODULE is the developer's own and is never rebuilt.
+    const char* explicit_module = std::getenv("SC64_GAME_MODULE");
+    const bool buildable = may_build && !pending_ && GameBuild::available();
+    const bool outdated = buildable && !(explicit_module && *explicit_module) && !GameBuild::current(storage);
+#else
+    constexpr bool buildable = false, outdated = false;
+#endif
     try {
+        if (outdated) throw game::ModuleError("The game module does not match this version of the application");
         game::load(storage);  // fails before any side effect when the game module is missing or mismatched
     } catch (const game::ModuleError&) {
 #if defined(SC64_HAS_SETUP)
-        // No module yet: build it from this ROM in the background and start once it exists.
-        if (GameBuild::available() && !pending_) {
-            pending_ = PendingLaunch{rom, storage, persist};
+        // No usable module yet: build it from this ROM in the background and start once it exists.
+        if (buildable) {
+            pending_ = PendingLaunch{storage, persist};
             build_.start(std::move(rom), storage);
             return;
         }
@@ -137,7 +149,7 @@ std::optional<std::string> Session::poll_build() {
     pending_.reset();
     if (state->failed) return state->text;
     try {
-        launch_rom(std::move(pending.rom), pending.storage, pending.persist);
+        launch_rom(std::move(state->rom), pending.storage, pending.persist, false);
     } catch (const std::exception& error) {
         return std::string(error.what());
     }

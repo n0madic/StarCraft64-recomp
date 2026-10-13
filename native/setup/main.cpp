@@ -46,11 +46,11 @@ int main(int argc, char** argv) {
                 if (i + 1 >= argc) throw SetupError(std::string(option) + " needs a value");
                 return argv[++i];
             };
-            if (option == "--rom") options.rom = fs::u8path(value());
-            else if (option == "--data") options.data_dir = fs::u8path(value());
-            else if (option == "--resources") options.resources = fs::u8path(value());
-            else if (option == "--recompiler") options.recompiler = fs::u8path(value());
-            else if (option == "--compiler") options.compiler = fs::u8path(value());
+            if (option == "--rom") options.rom = path_from_utf8(value());
+            else if (option == "--data") options.data_dir = path_from_utf8(value());
+            else if (option == "--resources") options.resources = path_from_utf8(value());
+            else if (option == "--recompiler") options.recompiler = path_from_utf8(value());
+            else if (option == "--compiler") options.compiler = path_from_utf8(value());
             else if (option == "--jobs") options.jobs = unsigned(std::max(1, std::atoi(value())));
             else if (option == "--force") options.force = true;
             else if (option == "--keep-work") options.keep_work = true;
@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
             if (options.resources.empty()) options.resources = here / "setup-resources";
         }
         if (options.recompiler.empty()) {
-            if (const char* env = std::getenv("SC64_RECOMPILER")) options.recompiler = fs::u8path(env);
+            if (const char* env = std::getenv("SC64_RECOMPILER")) options.recompiler = path_from_utf8(env);
             else options.recompiler = first_file(recompiler_candidates(here, host_info()));
             if (options.recompiler.empty()) options.recompiler = here / ("N64Recomp" + host_info().exe_suffix);
         }
@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
         report.step = [](int step, int total, const std::string& text) { std::printf("[%d/%d] %s\n", step, total, text.c_str()); std::fflush(stdout); };
         report.info = [](const std::string& text) { std::printf("      %s\n", text.c_str()); std::fflush(stdout); };
         const Result result = run_setup(options, run_process, report);
-        std::printf("%s: %s\n", result.rebuilt ? "Built" : "Ready", result.module.string().c_str());
+        std::printf("%s: %s\n", result.rebuilt ? "Built" : "Ready", path_utf8(result.module).c_str());
         return 0;
     } catch (const SetupError& error) {
         std::fprintf(stderr, "sc64_setup: %s\n", error.what());

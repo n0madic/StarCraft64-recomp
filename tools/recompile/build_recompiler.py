@@ -246,8 +246,10 @@ def verify(target: str, rom: Path, host: Host, binary: Path | None = None) -> di
     mounts = () if rom.is_relative_to(ROOT) else (f"{rom.parent}:{rom.parent}:ro",)
     launch, runner = launcher(target, host, mounts)
     report = recipe.generate(rom, binary, None, launch=launch)
+    # The manifest names the hashes of the symbols, the config and every generated file: the verification is
+    # valid for exactly this recipe.
     result = {"rom_sha1": recipe.ROM_SHA1, "generated_files": len(report["files"]), "runner": runner,
-              "binary_sha256": sha256(binary)}
+              "binary_sha256": sha256(binary), "recipe_sha256": sha256(recipe.RECIPE / recipe.MANIFEST)}
     receipt_path = binary.parent / "receipt.json"
     if receipt_path.is_file():
         receipt = json.loads(receipt_path.read_text())

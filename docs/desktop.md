@@ -159,7 +159,9 @@ without `--allow-dirty`). macOS apps are sealed ad hoc but not notarized, Window
 Installed packages (stage 5) contain no game code. With `setup-resources/` and `N64Recomp` beside
 the application and no game module yet, starting the application with your NTSC-U ROM builds the
 module once (ADR-087): the start message shows the five steps, the module lands in
-`<storage>/game/sc64-game.*` with a `receipt.json`, and the game starts. The same step runs from a
+`<storage>/game/sc64-game.*` with a `receipt.json`, and the game starts. A module whose receipt no longer
+matches the application (a new version changed its sources, flags, recipe or N64Recomp) is rebuilt the same
+way at the next start; closing the window cancels a running build. The same step runs from a
 terminal:
 
 ```sh

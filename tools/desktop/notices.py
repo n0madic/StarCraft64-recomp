@@ -8,11 +8,15 @@ on this machine, never written from memory. The output holds no game data.
 """
 from __future__ import annotations
 
+import glob
 import re
+import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / 'third_party/N64ModernRuntime'
@@ -76,6 +80,42 @@ def star_block(path: Path, contains: str) -> Callable[[], str]:
     return read
 
 
+def first_of(label: str, *sources: Callable[[], str | None]) -> Callable[[], str]:
+    """The first source that yields text; each source returns None when its file is not on this machine."""
+    def read() -> str:
+        for source in sources:
+            text = source()
+            if text:
+                return text.strip() + '\n'
+        raise NoticeError(f'No license text for {label} was found on this machine (see tools/desktop/notices.py for the places tried)')
+    return read
+
+
+def local_file(pattern: str) -> Callable[[], str | None]:
+    """The first file matching an absolute glob pattern."""
+    def read() -> str | None:
+        for name in sorted(glob.glob(pattern)):
+            if Path(name).is_file():
+                return Path(name).read_text(errors='replace')
+        return None
+    return read
+
+
+def linux_image_file(shell_glob: str) -> Callable[[], str | None]:
+    """A file of the pinned Debian cross image that builds the Linux package (docker only; nothing is pushed)."""
+    def read() -> str | None:
+        if not shutil.which('docker'):
+            return None
+        sys.path.insert(0, str(ROOT / 'tools/desktop'))
+        import cross_build
+        import hostenv
+        image = cross_build.docker_image(hostenv.current())
+        done = subprocess.run(['docker', 'run', '--rm', image, 'sh', '-c', f'cat $(ls {shell_glob} | head -n 1)'],
+                              capture_output=True, text=True)
+        return done.stdout if done.returncode == 0 else None
+    return read
+
+
 def mit_with_copyright(header: Path, source_license: Path) -> Callable[[], str]:
     """The standard MIT text with the copyright line the header declares in SPDX form."""
     def read() -> str:
@@ -99,7 +139,41 @@ class Component:
     text: Callable[[], str] | None  # None: the text is shared (see GPL_FILE)
 
 
-def components(root: Path = ROOT) -> list[Component]:
+def runtime_components(target: str | None) -> list[Component]:
+    """C runtime pieces linked statically into the binaries of one package target (none for macOS)."""
+    gcc_runtime = first_of('the GCC Runtime Library Exception',
+                           local_file('/opt/homebrew/Cellar/gcc/*/COPYING.RUNTIME'),
+                           local_file('/usr/local/Cellar/gcc/*/COPYING.RUNTIME'),
+                           local_file('/usr/share/doc/gcc-*-base/copyright'),
+                           local_file('/usr/share/doc/gcc-mingw-w64-base/copyright'),
+                           local_file('/mingw64/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION'),
+                           linux_image_file('/usr/share/doc/gcc-*-base/copyright'))
+    if target == 'linux':
+        return [
+            Component('GNU C Library (glibc), statically linked', 'LGPL-2.1+', 'N64Recomp (Linux)', 'glibc-LGPL-2.1.txt',
+                      first_of('the LGPL-2.1', local_file('/usr/share/common-licenses/LGPL-2.1'),
+                               linux_image_file('/usr/share/common-licenses/LGPL-2.1'))),
+            Component('GNU C Library copyright notices', 'LGPL-2.1+', 'N64Recomp (Linux)', 'glibc-copyright.txt',
+                      first_of('the glibc copyright notices', local_file('/usr/share/doc/libc6-dev/copyright'),
+                               linux_image_file('/usr/share/doc/libc6-dev*/copyright'))),
+            Component('libstdc++ and libgcc', 'GPL-3.0+ with the GCC Runtime Library Exception', 'StarCraft64, sc64_setup, N64Recomp (Linux)',
+                      'GCC-runtime-exception.txt', gcc_runtime),
+        ]
+    if target == 'windows':
+        return [
+            Component('mingw-w64 runtime (CRT, winpthreads)', 'ZPL-2.1, MIT and others', 'every Windows executable',
+                      'mingw-w64.txt', first_of('the mingw-w64 license summary',
+                                                local_file('/opt/homebrew/Cellar/mingw-w64/*/COPYING'),
+                                                local_file('/usr/local/Cellar/mingw-w64/*/COPYING'),
+                                                local_file('/usr/share/doc/mingw-w64-x86-64-dev/copyright'),
+                                                local_file('/mingw64/share/licenses/mingw-w64-crt/COPYING'))),
+            Component('libstdc++ and libgcc', 'GPL-3.0+ with the GCC Runtime Library Exception', 'every Windows executable',
+                      'GCC-runtime-exception.txt', gcc_runtime),
+        ]
+    return []
+
+
+def components(root: Path = ROOT, target: str | None = None) -> list[Component]:
     runtime, recomp, tools = root / 'third_party/N64ModernRuntime', root / 'third_party/N64Recomp', root / 'local/toolchains'
     mit_source = recomp / 'LICENSE'
     return [
@@ -130,19 +204,31 @@ def components(root: Path = ROOT) -> list[Component]:
                   star_block(runtime / 'thirdparty/sse2neon/sse2neon.h', 'freely redistributable under the MIT License')),
         Component('DejaVu Sans Mono Bold', 'Bitstream Vera / DejaVu license', 'overlay font', 'DejaVu.txt',
                   whole(tools / 'dejavu/LICENSE')),
-    ]
+    ] + runtime_components(target)
 
 
 def git(*words: str, cwd: Path = ROOT) -> str:
     return subprocess.run(['git', '-C', str(cwd), *words], capture_output=True, text=True).stdout.strip()
 
 
+def public_url(remote: str) -> str:
+    """An anonymous https URL for a git remote: no credentials, ssh forms rewritten, anything else rejected."""
+    remote = remote.strip()
+    scp_like = re.fullmatch(r'[\w.-]+@([\w.-]+):(?!//)(.+)', remote)  # git@github.com:owner/repo.git
+    if scp_like:
+        host, path = scp_like.groups()
+    else:
+        parts = urlsplit(remote)
+        if parts.scheme not in ('https', 'http', 'ssh', 'git') or not parts.hostname:
+            raise NoticeError(f'The origin remote {parts.scheme or "?"}://... is not a URL the source statement can publish')
+        host, path = parts.hostname + (f':{parts.port}' if parts.port and parts.scheme.startswith('http') else ''), parts.path.lstrip('/')
+    return 'https://' + host + '/' + path.removesuffix('.git')
+
+
 def source_info(root: Path = ROOT) -> dict:
     """Where the corresponding source of this build can be fetched."""
-    url = git('remote', 'get-url', 'origin', cwd=root) or REPOSITORY_URL
-    if url.startswith('git@github.com:'):
-        url = 'https://github.com/' + url[len('git@github.com:'):]
-    url = url.removesuffix('.git')
+    remote = git('remote', 'get-url', 'origin', cwd=root)
+    url = public_url(remote) if remote else REPOSITORY_URL
     commit = git('rev-parse', 'HEAD', cwd=root)
     return {'url': url, 'commit': commit,
             'dirty': bool(git('status', '--porcelain', '--untracked-files=no', cwd=root)),
@@ -151,7 +237,7 @@ def source_info(root: Path = ROOT) -> dict:
             'recompiler_commit': git('rev-parse', 'HEAD', cwd=root / 'third_party/N64Recomp')}
 
 
-def render(info: dict, items: list[Component], texts: dict[str, str]) -> dict[str, str]:
+def render(info: dict, items: list[Component], texts: dict[str, str], target: str | None = None) -> dict[str, str]:
     """Package files: NOTICE.txt, SOURCE.txt and LICENSES/*."""
     rows = '\n'.join(f'  {item.name}\n      License: {item.license_id}; used in: {item.used_in}; text: LICENSES/{item.file}'
                      for item in items)
@@ -180,25 +266,33 @@ def render(info: dict, items: list[Component], texts: dict[str, str]) -> dict[st
         f'  git clone {info["url"]}\n  git checkout {info["commit"]}\n\n'
         'It is available there at no charge, for as long as this package is offered. Build instructions\n'
         'are in docs/desktop.md ("make package").\n')
+    if target == 'linux':
+        source += ('\nN64Recomp in this package is linked statically against the GNU C Library (LGPL-2.1+, see\n'
+                   'LICENSES/glibc-LGPL-2.1.txt). It is built from the source above with "make build-recompiler";\n'
+                   'rebuilding it against another version of the library is the way to relink it.\n')
     files = {'NOTICE.txt': notice, 'SOURCE.txt': source}
     for item in items:
         files[f'LICENSES/{item.file}'] = texts[item.file]
     return files
 
 
-def build(root: Path = ROOT) -> tuple[dict[str, str], dict]:
-    items = components(root)
+def build(root: Path = ROOT, target: str | None = None) -> tuple[dict[str, str], dict]:
+    items = components(root, target)
     texts = {item.file: item.text() for item in items if item.text}
     info = source_info(root)
-    return render(info, items, texts), info
+    for key in ('commit', 'runtime_commit', 'recompiler_commit'):
+        if not info[key]:
+            raise NoticeError(f'SOURCE.txt needs the {key.replace("_", " ")} but git reports none; build from the repository checkouts')
+    return render(info, items, texts, target), info
 
 
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path, help='directory to write NOTICE.txt, SOURCE.txt and LICENSES/ into')
+    parser.add_argument('--target', choices=('macos', 'linux', 'windows'), help='package target (adds its runtime licenses)')
     args = parser.parse_args()
-    files, info = build()
+    files, info = build(target=args.target)
     for name, text in files.items():
         path = args.output / name
         path.parent.mkdir(parents=True, exist_ok=True)

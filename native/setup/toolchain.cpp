@@ -35,10 +35,10 @@ std::vector<std::string> compile_args(const Toolchain& toolchain, const HostInfo
     for (auto& flag : compile_flags(host)) args.push_back(std::move(flag));
     if (host.os == "macos" && toolchain.kind != "zig") args.push_back("-mmacosx-version-min=13.0");
     args.push_back("-DSC64_MODULE_ROM_SHA1=\"" + sources.rom_sha1 + "\"");
-    args.push_back("-I" + sources.module_dir.string());
-    args.push_back("-I" + (sources.module_dir / "include").string());
-    args.push_back("-I" + sources.generated_dir.string());
-    args.insert(args.end(), {"-c", source.string(), "-o", object.string()});
+    args.push_back("-I" + path_utf8(sources.module_dir));
+    args.push_back("-I" + path_utf8(sources.module_dir / "include"));
+    args.push_back("-I" + path_utf8(sources.generated_dir));
+    args.insert(args.end(), {"-c", path_utf8(source), "-o", path_utf8(object)});
     return args;
 }
 
@@ -48,11 +48,11 @@ std::vector<std::string> link_args(const Toolchain& toolchain, const HostInfo& h
     args.push_back(host.os == "macos" && toolchain.kind != "zig" ? "-dynamiclib" : "-shared");
     if (host.os == "macos" && toolchain.kind != "zig") args.push_back("-mmacosx-version-min=13.0");
     // The install name would otherwise record the temporary work directory.
-    if (host.os == "macos") args.push_back("-Wl,-install_name,@rpath/" + output.filename().string());
+    if (host.os == "macos") args.push_back("-Wl,-install_name,@rpath/" + path_utf8(output.filename()));
     if (host.os != "macos") args.push_back("-s");  // symbols are not needed; the module is large otherwise
     if (host.os == "windows") args.push_back("-static-libgcc");
-    for (const auto& object : objects) args.push_back(object.string());
-    args.insert(args.end(), {"-o", output.string()});
+    for (const auto& object : objects) args.push_back(path_utf8(object));
+    args.insert(args.end(), {"-o", path_utf8(output)});
     return args;
 }
 
@@ -66,12 +66,19 @@ std::string zig_target(const HostInfo& host) {
 Toolchain zig_toolchain(const std::filesystem::path& zig, const HostInfo& host, const std::string& version,
                         const std::filesystem::path& cache_dir) {
     // zig keeps compiled libc support and compiler_rt in a cache; keep it with the tool, not in a profile folder.
-    const auto path = [](const std::filesystem::path& p) { const auto text = p.u8string(); return std::string(text.begin(), text.end()); };
     return {"zig", zig, {"cc", "-target", zig_target(host)}, "zig " + version,
-            {{"ZIG_GLOBAL_CACHE_DIR", path(cache_dir / "global")}, {"ZIG_LOCAL_CACHE_DIR", path(cache_dir / "local")}}};
+            {{"ZIG_GLOBAL_CACHE_DIR", path_utf8(cache_dir / "global")}, {"ZIG_LOCAL_CACHE_DIR", path_utf8(cache_dir / "local")}}};
 }
 
-std::vector<Toolchain> system_candidates(const HostInfo& host, const std::string& cc_env) {
+bool macos_developer_tools(const Runner& run, const std::filesystem::path& scratch) {
+    std::filesystem::create_directories(scratch);
+    std::string path = run_capture(run, {"xcode-select", {"-p"}, {}, {}}, scratch / "xcode-select.txt");
+    path = path.substr(0, path.find_first_of("\r\n"));
+    std::error_code error;
+    return !path.empty() && std::filesystem::is_directory(path_from_utf8(path), error);
+}
+
+std::vector<Toolchain> system_candidates(const HostInfo& host, const std::string& cc_env, bool shims) {
     std::vector<Toolchain> result;
     if (!cc_env.empty()) {
         std::istringstream words(cc_env);
@@ -79,8 +86,10 @@ std::vector<Toolchain> system_candidates(const HostInfo& host, const std::string
         words >> program;
         Toolchain toolchain{"", program, {}, "", {}};
         while (words >> word) toolchain.prefix.push_back(word);
-        if (!program.empty()) result.push_back(std::move(toolchain));
+        const bool shim = program == "cc" || program == "clang" || program == "gcc";
+        if (!program.empty() && (shims || !shim)) result.push_back(std::move(toolchain));
     }
+    if (!shims) return result;
     const std::vector<std::string> names = host.os == "windows" ? std::vector<std::string>{"gcc", "clang", "cc"}
                                                                    : std::vector<std::string>{"cc", "clang", "gcc"};
     for (const auto& name : names) {

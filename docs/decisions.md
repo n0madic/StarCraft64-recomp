@@ -2225,3 +2225,31 @@ was shown to work. A Python test ties the probe's hook form to the recipe's hook
 `-O3` in the first mission found guest code at 1.4% of one core for both and a difference (+1.9%) below the
 run-to-run spread (docs/performance.md). `-ffp-contract=off` and `-fno-strict-aliasing` are required for
 correctness, not speed.
+
+**Amendment to ADR-087 and ADR-088 (2026-10-13, code review of the launcher series):**
+- *Rebuild loop.* A launch that follows a finished build no longer starts another build
+  (`Session::launch_rom(..., may_build=false)`); a module that still cannot be loaded now shows its error.
+- *Stale modules.* The receipt gained `sources_sha256`: the hashes of `module_main.c`, `sc64_module.h`,
+  `sc64_imports.def`, `recomp.h`, the `sections.h` shim and the compile flags. `setup::module_is_current` is
+  the test `run_setup` uses to do nothing, and the shell calls it (`GameBuild::current`) before loading
+  the module of the game folder when the launcher resources are present, so an application update that
+  changes any of them rebuilds the module without an ABI bump. `$SC64_GAME_MODULE` is never rebuilt.
+- *Build worker.* `GameBuild` shares its state with the worker thread (`shared_ptr`), reads `finished` before
+  the text it guards, and cancels on destruction: `Command::cancel` makes `run_process` terminate the running
+  child (SIGTERM / `TerminateProcess`, status 143), so closing the window ends the compiler instead of
+  leaving it behind. The ROM lives in one buffer and is handed back with the finished state.
+- *Process launching.* Paths cross the process boundary as UTF-8 (`path_utf8`; `path::string()` is the ANSI
+  code page on Windows), bare program names on Windows are resolved in System32 and the absolute `PATH`
+  entries only (not the current directory), the zig download has connect and stall timeouts, and on macOS
+  the `cc`/`clang`/`gcc` shims are not probed when `xcode-select -p` finds no developer tools (they open the
+  system installer dialog); a real compiler named by `$CC` is still probed.
+- *Release gate.* A recompiler's `recipe_verification` records the SHA-256 of the recipe's `generated.json`;
+  `package.py` refuses a binary verified against another recipe or built with an older patch tool.
+- *Licenses.* `NOTICE.txt` also covers the C runtime linked statically into a package's binaries: glibc
+  (LGPL-2.1+, with a relinking note in `SOURCE.txt`) and libstdc++/libgcc for Linux; the mingw-w64 runtime and
+  libstdc++/libgcc for Windows. The texts are read from the Debian cross image, Homebrew's gcc and mingw-w64 or
+  the system (`notices.py` lists the places) and the build stops if none is found. The origin URL in
+  `SOURCE.txt` has credentials removed and ssh forms rewritten to https, and the build stops when a commit is
+  unknown.
+- `make setup-game` builds `sc64_setup` from its own tree (`local/build/setup`, `desktop/build.py
+  --setup-only`) that needs no generated game code.

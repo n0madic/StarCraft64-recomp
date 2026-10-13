@@ -36,3 +36,8 @@ add_test(NAME setup COMMAND sc64_setup_test)
 target_sources(sc64_shell PRIVATE "${SC64_ROOT}/native/shell/game_build.cpp")
 target_compile_definitions(sc64_shell PUBLIC SC64_HAS_SETUP=1)
 target_link_libraries(sc64_shell PUBLIC sc64_setup_lib)
+
+# The first-run build worker against a fake process runner (cancellation, failure reporting, state hand-over).
+add_executable(sc64_game_build_test "${SC64_ROOT}/tests/native/test_game_build.cpp")
+target_link_libraries(sc64_game_build_test PRIVATE sc64_shell)
+add_test(NAME game_build COMMAND sc64_game_build_test)

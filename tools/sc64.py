@@ -35,7 +35,7 @@ NATIVE_TEST_TARGETS = (
     'sc64_guest_fpu_test', 'sc64_gfx_test', 'sc64_rom_import_test', 'sc64_sha_test',
     'sc64_desktop_input_test', 'sc64_touch_input_test', 'sc64_gestures_test', 'sc64_map_taps_test',
     'sc64_hud_input_test', 'sc64_hud_buttons_test', 'sc64_menu_input_test', 'sc64_haptics_test',
-    'sc64_host_telemetry_test', 'sc64_loop_watch_test', 'sc64_game_module_test', 'sc64_setup_test')
+    'sc64_host_telemetry_test', 'sc64_loop_watch_test', 'sc64_game_module_test', 'sc64_setup_test', 'sc64_game_build_test')
 
 # Pins of the recompilation environment (the splat research workflow has its own, see
 # docs/research-workflow.md): `recompile_all.py` needs spimdisasm and its disassembler;
@@ -132,15 +132,15 @@ def package_commands(target: str | None):
 
 
 def setup_game_commands(host: Host, args: argparse.Namespace) -> list[Command]:
-    """Run sc64_setup (ROM -> game module, ADR-087) from the desktop build tree with this host's recompiler."""
+    """Run sc64_setup (ROM -> game module, ADR-087) from its own game-code-free build tree with this host's recompiler."""
     rom = require_rom(args.rom, 'setup-game')
-    build = ROOT / 'local/build/desktop'
+    build = ROOT / 'local/build/setup'  # a tree without any game code: what a launcher user has
     target = f'{"macos" if host.system == "darwin" else host.system}-{host.arch}'
     recompiler = ROOT / 'local/dist/recompiler' / target / ('N64Recomp' + host.exe_suffix)
     if not recompiler.is_file():
         raise UsageError(f'{recompiler} not found: run `python tools/sc64.py build-recompiler` first')
     data = ['--data', str(args.data_dir)] if args.data_dir else []
-    return [script('desktop/build.py', '--build-type', args.build_type, '--configure-only'),
+    return [script('desktop/build.py', '--build-type', args.build_type, '--setup-only', '--configure-only'),
             ['cmake', '--build', str(build), '--target', 'sc64_setup', '-j', str(args.jobs)],
             [str(build / ('sc64_setup' + host.exe_suffix)), '--rom', str(rom), '--recompiler', str(recompiler),
              '--resources', str(build / 'setup-resources'), '--jobs', str(args.jobs), *data,

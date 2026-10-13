@@ -112,7 +112,7 @@ class RunAndTestTests(unittest.TestCase):
         cmake = (ROOT / 'CMakeLists.txt').read_text()
         shell = (ROOT / 'cmake/shell.cmake').read_text()
         for target in driver.NATIVE_TEST_TARGETS:
-            if target in ('sc64_game_module_test', 'sc64_setup_test'):
+            if target in ('sc64_game_module_test', 'sc64_setup_test', 'sc64_game_build_test'):
                 self.assertIn(f'add_executable({target} ', shell + (ROOT / 'cmake/setup.cmake').read_text())
             elif target not in ('sc64_host_telemetry_test', 'sc64_loop_watch_test'):
                 self.assertIn(target[len('sc64_'):-len('_test')], cmake, target)
@@ -287,6 +287,8 @@ class SetupGameTests(unittest.TestCase):
             recompiler.write_text('')
             lines = commands(LINUX, 'setup-game', '--rom', '/g.z64', '--data-dir', '/d', '--use-zig')
         self.assertEqual([Path(name).name for name in names(lines)], ['build.py', 'cmake', 'sc64_setup'])
+        self.assertIn('--setup-only', lines[0])  # no generated game code is needed to build the tool
+        self.assertIn('local/build/setup', lines[1][lines[1].index('-B') + 1] if '-B' in lines[1] else ' '.join(lines[1]))
         self.assertIn('sc64_setup', lines[1])
         run = lines[2]
         self.assertEqual(run[run.index('--rom') + 1], '/g.z64')

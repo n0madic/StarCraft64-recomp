@@ -14,6 +14,7 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <csignal>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -21,6 +22,15 @@ extern char** environ;
 #endif
 
 namespace sc64::setup {
+std::string path_utf8(const std::filesystem::path& path) {
+    const auto text = path.u8string();
+    return std::string(text.begin(), text.end());
+}
+
+std::filesystem::path path_from_utf8(const std::string& utf8) {
+    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
+}
+
 std::string quote_argument(const std::string& argument) {
     if (!argument.empty() && argument.find_first_of(" \t\n\v\"") == std::string::npos) return argument;
     std::string result = "\"";
@@ -36,7 +46,7 @@ std::string quote_argument(const std::string& argument) {
 }
 
 std::string describe(const Command& command) {
-    std::string text = quote_argument(command.program.string());
+    std::string text = quote_argument(path_utf8(command.program));
     for (const auto& argument : command.args) text += ' ' + quote_argument(argument);
     return text;
 }
@@ -50,15 +60,43 @@ std::wstring wide(const std::string& utf8) {
     MultiByteToWideChar(CP_UTF8, 0, utf8.data(), int(utf8.size()), result.data(), size);
     return result;
 }
+
+// A bare program name is looked up in System32 and then in the absolute PATH entries. CreateProcessW
+// would try the current directory and the application folder first, so a file planted there would run.
+std::filesystem::path resolve_program(const std::filesystem::path& program) {
+    namespace fs = std::filesystem;
+    if (program.has_parent_path()) return program;
+    fs::path name = program;
+    if (!name.has_extension()) name += L".exe";
+    std::vector<fs::path> directories;
+    wchar_t system[MAX_PATH];
+    if (const UINT length = GetSystemDirectoryW(system, MAX_PATH); length > 0 && length < MAX_PATH) directories.emplace_back(system);
+    std::wstring path(32768, L'\0');
+    path.resize(GetEnvironmentVariableW(L"PATH", path.data(), DWORD(path.size())));
+    for (std::size_t start = 0; start <= path.size();) {
+        std::size_t end = path.find(L';', start);
+        if (end == std::wstring::npos) end = path.size();
+        fs::path entry = path.substr(start, end - start);
+        if (!entry.empty() && entry.is_absolute()) directories.push_back(std::move(entry));
+        start = end + 1;
+    }
+    for (const auto& directory : directories) {
+        std::error_code error;
+        if (fs::is_regular_file(directory / name, error)) return directory / name;
+    }
+    throw std::runtime_error("Cannot start " + path_utf8(program) + ": not found in the system folder or PATH");
+}
 }
 
-int run_process(const Command& command) {
+int run_process(const Command& original) {
+    Command command = original;
+    command.program = resolve_program(original.program);
     SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
     HANDLE log = INVALID_HANDLE_VALUE;
     if (!command.log.empty()) {
         log = CreateFileW(command.log.wstring().c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
                           &inheritable, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (log == INVALID_HANDLE_VALUE) throw std::runtime_error("Cannot open log " + command.log.string());
+        if (log == INVALID_HANDLE_VALUE) throw std::runtime_error("Cannot open log " + path_utf8(command.log));
     }
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
@@ -89,8 +127,16 @@ int run_process(const Command& command) {
                                         CREATE_NO_WINDOW | (block.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT), block.empty() ? nullptr : block.data(),
                                         nullptr, &startup, &info);
     if (log != INVALID_HANDLE_VALUE) CloseHandle(log);
-    if (!started) throw std::runtime_error("Cannot start " + command.program.string() + " (error " + std::to_string(GetLastError()) + ")");
-    WaitForSingleObject(info.hProcess, INFINITE);
+    if (!started) throw std::runtime_error("Cannot start " + path_utf8(command.program) + " (error " + std::to_string(GetLastError()) + ")");
+    if (!command.cancel) {
+        WaitForSingleObject(info.hProcess, INFINITE);
+    } else {
+        while (WaitForSingleObject(info.hProcess, 100) == WAIT_TIMEOUT) {
+            if (!command.cancel->load()) continue;
+            TerminateProcess(info.hProcess, 143);
+            WaitForSingleObject(info.hProcess, INFINITE);
+        }
+    }
     DWORD status = 1;
     GetExitCodeProcess(info.hProcess, &status);
     CloseHandle(info.hThread);
@@ -126,8 +172,24 @@ int run_process(const Command& command) {
     posix_spawn_file_actions_destroy(&actions);
     if (error) throw std::runtime_error("Cannot start " + words[0] + ": " + std::strerror(error));
     int status = 0;
-    while (waitpid(pid, &status, 0) < 0) {
-        if (errno != EINTR) throw std::runtime_error("waitpid failed for " + words[0]);
+    const auto wait_for = [&](int flags) {
+        for (;;) {
+            const pid_t done = waitpid(pid, &status, flags);
+            if (done >= 0) return done;
+            if (errno != EINTR) throw std::runtime_error("waitpid failed for " + words[0]);
+        }
+    };
+    if (!command.cancel) {
+        wait_for(0);
+    } else {
+        while (wait_for(WNOHANG) == 0) {
+            if (command.cancel->load()) {
+                kill(pid, SIGTERM);
+                wait_for(0);
+                break;
+            }
+            usleep(50000);
+        }
     }
     if (WIFEXITED(status)) return WEXITSTATUS(status);
     return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1;

@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import shutil
 import stat
 import sys
 import tarfile
@@ -186,32 +187,63 @@ class ArchiveTests(Workspace):
 
 
 class RecompilerGateTests(Workspace):
+    def setUp(self):
+        super().setUp()
+        (self.directory / 'recipe').mkdir()
+        (self.directory / 'recipe/generated.json').write_text('{"recipe": 1}')
+        (self.directory / 'patch_recompiler.py').write_text('# patch tool')
+        self.recipe_hash = hashlib.sha256(b'{"recipe": 1}').hexdigest()
+        self.patch_hash = hashlib.sha256(b'# patch tool').hexdigest()
+        for name, value in (('RECOMPILERS', self.directory / 'recompilers'), ('RECIPE', self.directory / 'recipe'),
+                            ('PATCH_TOOL', self.directory / 'patch_recompiler.py')):
+            patcher = mock.patch.object(package, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def prepare(self, **receipt):
         directory = self.directory / 'recompilers' / 'linux-x86_64'
         directory.mkdir(parents=True)
         binary = directory / 'N64Recomp'
         binary.write_bytes(b'n64recomp')
-        data = {'binary_sha256': hashlib.sha256(b'n64recomp').hexdigest(), 'recipe_verification': {'generated_files': 86}}
+        data = {'binary_sha256': hashlib.sha256(b'n64recomp').hexdigest(),
+                'recipe_verification': {'generated_files': 86, 'recipe_sha256': self.recipe_hash},
+                'source': {'patch_tool_sha256': self.patch_hash}}
         data.update(receipt)
         (directory / 'receipt.json').write_text(json.dumps(data))
         return binary
 
     def test_a_verified_binary_is_accepted(self):
         binary = self.prepare()
-        with mock.patch.object(package, 'RECOMPILERS', self.directory / 'recompilers'):
-            self.assertEqual(package.check_recompiler('linux'), binary)
+        self.assertEqual(package.check_recompiler('linux'), binary)
+
+    def test_a_verification_of_another_recipe_is_refused(self):
+        self.prepare(recipe_verification={'generated_files': 86, 'recipe_sha256': '0' * 64})
+        with self.assertRaisesRegex(SystemExit, 'different recipe'):
+            package.check_recompiler('linux')
+        (self.directory / 'recipe/generated.json').write_text('{"recipe": 2}')  # the recipe changed after the check
+        self.prepare_again()
+        with self.assertRaisesRegex(SystemExit, 'different recipe'):
+            package.check_recompiler('linux')
+
+    def prepare_again(self):
+        shutil.rmtree(self.directory / 'recompilers')
+        self.prepare()
+
+    def test_a_binary_built_with_an_older_patch_tool_is_refused(self):
+        self.prepare()
+        (self.directory / 'patch_recompiler.py').write_text('# newer patch tool')
+        with self.assertRaisesRegex(SystemExit, 'older patch tool'):
+            package.check_recompiler('linux')
 
     def test_unverified_or_foreign_binaries_are_refused(self):
-        with mock.patch.object(package, 'RECOMPILERS', self.directory / 'recompilers'):
-            with self.assertRaisesRegex(SystemExit, 'build-recompiler'):
-                package.check_recompiler('linux')
-            self.prepare(recipe_verification=None)
-            with self.assertRaisesRegex(SystemExit, 'verify-recompiler'):
-                package.check_recompiler('linux')
+        with self.assertRaisesRegex(SystemExit, 'build-recompiler'):
+            package.check_recompiler('linux')
+        self.prepare(recipe_verification=None)
+        with self.assertRaisesRegex(SystemExit, 'verify-recompiler'):
+            package.check_recompiler('linux')
         (self.directory / 'recompilers/linux-x86_64/receipt.json').write_text(json.dumps({'binary_sha256': '0' * 64, 'recipe_verification': {}}))
-        with mock.patch.object(package, 'RECOMPILERS', self.directory / 'recompilers'):
-            with self.assertRaisesRegex(SystemExit, 'another binary'):
-                package.check_recompiler('linux')
+        with self.assertRaisesRegex(SystemExit, 'another binary'):
+            package.check_recompiler('linux')
 
 
 class NoticeTests(unittest.TestCase):
@@ -247,6 +279,37 @@ class NoticeTests(unittest.TestCase):
         self.assertIn('no game code', files['NOTICE.txt'])
         for fragment in (info['url'], 'a' * 40, 'b' * 40, 'c' * 40, 'git checkout'):
             self.assertIn(fragment, files['SOURCE.txt'])
+
+    def test_the_published_source_url_is_anonymous_and_clonable(self):
+        for remote in ('git@github.com:n0madic/StarCraft64-recomp.git', 'ssh://git@github.com/n0madic/StarCraft64-recomp',
+                       'https://user:ghp_secret@github.com/n0madic/StarCraft64-recomp.git', 'https://github.com/n0madic/StarCraft64-recomp'):
+            with self.subTest(remote=remote):
+                self.assertEqual(notices.public_url(remote), 'https://github.com/n0madic/StarCraft64-recomp')
+        with self.assertRaisesRegex(SystemExit, 'not a URL'):
+            notices.public_url('/Users/someone/repo')
+
+    def test_a_missing_dependency_commit_stops_the_build(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(notices, 'components', return_value=[]):
+            with self.assertRaisesRegex(SystemExit, 'git reports none'):
+                notices.build(Path(directory))
+
+    def test_static_runtime_licenses_belong_to_the_targets_that_link_them(self):
+        names = {target: {item.file for item in notices.runtime_components(target)} for target in ('macos', 'linux', 'windows')}
+        self.assertEqual(names['macos'], set())
+        self.assertIn('glibc-LGPL-2.1.txt', names['linux'])
+        self.assertIn('mingw-w64.txt', names['windows'])
+        self.assertIn('GCC-runtime-exception.txt', names['linux'] & names['windows'])
+        info = {'url': 'https://example.org/repo', 'commit': 'a' * 40, 'runtime_commit': 'b' * 40, 'recompiler_commit': 'c' * 40}
+        self.assertIn('GNU C Library', notices.render(info, [], {}, 'linux')['SOURCE.txt'])
+        self.assertNotIn('GNU C Library', notices.render(info, [], {}, 'windows')['SOURCE.txt'])
+
+    def test_license_sources_are_tried_in_order_and_a_miss_is_an_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / 'found.txt').write_text('  license body\n\n')
+            read = notices.first_of('x', notices.local_file(directory + '/absent*'), notices.local_file(directory + '/found*'))
+            self.assertEqual(read(), 'license body\n')
+            with self.assertRaisesRegex(SystemExit, 'No license text for y'):
+                notices.first_of('y', notices.local_file(directory + '/absent*'))()
 
     @unittest.skipUnless((ROOT / 'third_party/N64ModernRuntime/COPYING').is_file() and (ROOT / 'local/toolchains/miniaudio.h').is_file(),
                          'needs the pinned dependency sources')

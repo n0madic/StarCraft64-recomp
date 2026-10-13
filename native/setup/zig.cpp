@@ -38,14 +38,16 @@ std::filesystem::path ensure_zig(const Runner& run, const HostInfo& host, const 
     if (!pin) throw SetupError("No C compiler found, and zig " + std::string(kVersion) + " has no pinned download for " +
                                host.os + "-" + host.arch + ". Install gcc or clang and run the setup again.");
     const std::string hint = "\nInstall a C compiler (gcc or clang), or download " + std::string(pin->url) + " yourself, "
-                             "unpack it so that " + binary.string() + " exists, and run the setup again.";
+                             "unpack it so that " + path_utf8(binary) + " exists, and run the setup again.";
     std::filesystem::create_directories(tools_dir);
     const auto archive = tools_dir / (std::string(pin->url).substr(std::string(pin->url).rfind('/') + 1) + ".part");
     info("Downloading zig " + std::string(kVersion) + " (one time)");
     try {
-        if (run({"curl", {"--fail", "--silent", "--show-error", "--location", "--retry", "3", "--output", archive.string(),
+        if (run({"curl", {"--fail", "--silent", "--show-error", "--location", "--retry", "3",
+                          // A blocked or stalled network must end in an error, not hang the first run.
+                          "--connect-timeout", "30", "--speed-limit", "1024", "--speed-time", "60", "--output", path_utf8(archive),
                           std::string(pin->url)}, log}) != 0)
-            throw SetupError("Download of zig failed (see " + log.string() + ")" + hint);
+            throw SetupError("Download of zig failed (see " + path_utf8(log) + ")" + hint);
     } catch (const SetupError&) {
         std::filesystem::remove(archive, error);
         throw;
@@ -61,8 +63,8 @@ std::filesystem::path ensure_zig(const Runner& run, const HostInfo& host, const 
     std::filesystem::remove_all(staging, error);
     std::filesystem::create_directories(staging);
     try {
-        if (run({"tar", {"-xf", archive.string(), "-C", staging.string()}, log}) != 0)
-            throw SetupError("Unpacking zig failed (see " + log.string() + ")" + hint);
+        if (run({"tar", {"-xf", path_utf8(archive), "-C", path_utf8(staging)}, log}) != 0)
+            throw SetupError("Unpacking zig failed (see " + path_utf8(log) + ")" + hint);
     } catch (const SetupError&) {
         std::filesystem::remove_all(staging, error);
         throw;
@@ -75,7 +77,7 @@ std::filesystem::path ensure_zig(const Runner& run, const HostInfo& host, const 
     std::filesystem::remove_all(staging, error);
     std::filesystem::remove(archive, error);
     if (!std::filesystem::is_regular_file(binary, error))
-        throw SetupError("The unpacked zig archive has no " + binary.filename().string() + hint);
+        throw SetupError("The unpacked zig archive has no " + path_utf8(binary.filename()) + hint);
     return binary;
 }
 }

@@ -116,6 +116,8 @@ class VerifyTests(unittest.TestCase):
         receipt = json.loads((self.directory / 'receipt.json').read_text())
         self.assertEqual(receipt['recipe_verification']['runner'], 'native')
         self.assertEqual(receipt['recipe_verification']['rom_sha1'], tool.recipe.ROM_SHA1)
+        # The verification names the recipe it was made against (package.py compares it with the shipped one).
+        self.assertEqual(receipt['recipe_verification']['recipe_sha256'], tool.sha256(tool.recipe.RECIPE / tool.recipe.MANIFEST))
 
     def test_a_receipt_for_another_binary_is_not_updated(self):
         self.write_receipt('0' * 64)

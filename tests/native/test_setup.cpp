@@ -7,6 +7,8 @@
 #include "sha.hpp"
 #include "toolchain.hpp"
 #include "zig.hpp"
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -14,6 +16,7 @@
 #include <json/json.hpp>
 #include <mutex>
 #include <string>
+#include <thread>
 
 namespace fs = std::filesystem;
 using namespace sc64::setup;
@@ -78,6 +81,24 @@ void test_process() {
     // Environment overrides reach the child, replacing inherited values.
     CHECK(run_process({argv0, {"--child", "env"}, {}, {{"SC64_TEST_ENV", "x y"}}}) == 0);
     CHECK(run_process({argv0, {"--child", "env"}, {}, {{"SC64_TEST_ENV", "other"}}}) == 4);
+
+    // Cancelling terminates a running child and returns 143; a command that already finished is unaffected.
+    std::atomic<bool> cancel{false};
+    Command sleeper{argv0, {"--child", "sleep"}, {}};
+    sleeper.cancel = &cancel;
+    std::thread canceller([&] { std::this_thread::sleep_for(std::chrono::milliseconds(300)); cancel = true; });
+    const auto began = std::chrono::steady_clock::now();
+    CHECK(run_process(sleeper) == 143);
+    CHECK(std::chrono::steady_clock::now() - began < std::chrono::seconds(30));
+    canceller.join();
+    Command quick{argv0, {"--child", "exit3"}, {}};
+    std::atomic<bool> never{false};
+    quick.cancel = &never;
+    CHECK(run_process(quick) == 3);
+
+    // Paths cross the process boundary as UTF-8 on every platform.
+    const std::string accented = "caf\xc3\xa9";
+    CHECK(path_utf8(path_from_utf8(accented)) == accented);
 
     // Batch: runs everything, reports the first failure and stops starting new commands.
     std::mutex mutex;
@@ -220,6 +241,27 @@ void test_toolchain() {
     CHECK(candidates[1].program == "cc" && candidates[3].program == "gcc");
     CHECK(system_candidates(windows, "")[0].program == "gcc");
     CHECK(system_candidates(mac, "cc").size() == 3);  // $CC=cc is not probed twice
+    // Without the developer tools the xcode-select shims are not run; a real compiler named by $CC still is.
+    CHECK(system_candidates(mac, "", false).empty() && system_candidates(mac, "cc", false).empty());
+    CHECK(system_candidates(mac, "/opt/homebrew/bin/gcc-14 -m64", false).size() == 1);
+    {
+        const fs::path directory = fs::temp_directory_path() / "sc64-setup-test-xcode";
+        fs::create_directories(directory);
+        const auto answers = [&](const std::string& text, int status) {
+            return Runner([text, status](const Command& c) { write(c.log, text); return status; });
+        };
+        CHECK(macos_developer_tools(answers(directory.string() + "\n", 0), directory / "a"));
+        CHECK(!macos_developer_tools(answers((directory / "absent").string() + "\n", 0), directory / "b"));
+        CHECK(!macos_developer_tools(answers("xcode-select: error\n", 2), directory / "c"));
+        CHECK(!macos_developer_tools([](const Command&) -> int { throw std::runtime_error("no xcode-select"); }, directory / "d"));
+        fs::remove_all(directory);
+    }
+    // A non-ASCII path reaches the compiler as the same UTF-8 bytes.
+    {
+        const auto accented = compile_args(gcc, linux, ModuleSources{path_from_utf8("/r\xc3\xa9s"), "/gen", "x"},
+                                           path_from_utf8("/g\xc3\xa9n/f.c"), path_from_utf8("/w\xc3\xa9/f.o"));
+        CHECK(has(accented, "-I/r\xc3\xa9s") && has(accented, "/g\xc3\xa9n/f.c") && has(accented, "/w\xc3\xa9/f.o"));
+    }
     // The probe builds what the game is made of, shape by shape.
     const std::string full = probe_source(true), small = probe_source(false);
     for (const char* shape : {"#include \"recomp.h\"", "RECOMP_FUNC void", "goto L_80000420;", "switch (jr_addend_80005244 >> 2)",
@@ -243,6 +285,7 @@ struct World {
     bool tamper = false, recompiler_exit = false, diagnostics = false, compile_fail = false, no_compiler = false;
     bool zig_download_fails = true;
     bool with_recomp_header = false;
+    bool no_developer_tools = false;  // macOS: xcode-select reports nothing installed
     std::string module_marker = "v1";
 
     std::map<std::string, std::string> generated_files() const {
@@ -302,6 +345,11 @@ struct World {
             return 0;
         }
         if (c.program == "curl") return zig_download_fails ? 22 : 0;
+        if (c.program == "xcode-select") {
+            if (no_developer_tools) return 2;
+            append(root.string() + "\n");
+            return 0;
+        }
         if (no_compiler) throw std::runtime_error("not found");
         const bool compiling = has(c.args, "-c");
         const bool linking = has(c.args, "-shared") || has(c.args, "-dynamiclib");
@@ -345,6 +393,19 @@ void test_flow() {
         Result second = run_setup(w.options(), w.runner(), report);
         CHECK(!second.rebuilt && w.commands.size() == before && steps.size() == 1);
 
+        CHECK(receipt.contains("sources_sha256"));
+        // The module is also rebuilt when its sources change although ABI, ROM, recipe and recompiler do not.
+        CHECK(module_is_current(w.options()));
+        write(w.resources / "module/module_main.c", "int changed_module;\n");
+        CHECK(!module_is_current(w.options()));
+        CHECK(run_setup(w.options(), w.runner(), report).rebuilt);
+        CHECK(module_is_current(w.options()));
+        write(w.resources / "module/sc64_imports.def", "// a new import\n");
+        CHECK(!module_is_current(w.options()));
+        CHECK(run_setup(w.options(), w.runner(), report).rebuilt && module_is_current(w.options()));
+        Options absent = w.options(); absent.data_dir = w.root / "nothing-built";
+        CHECK(!module_is_current(absent));
+
         Options forced = w.options(); forced.force = true;
         CHECK(run_setup(forced, w.runner(), report).rebuilt);
         w.set_abi(2);
@@ -353,6 +414,26 @@ void test_flow() {
         CHECK(again["abi"] == 2);
         write(first.module, "tampered module");  // a module that no longer matches its receipt is rebuilt
         CHECK(run_setup(w.options(), w.runner(), report).rebuilt);
+        fs::remove_all(w.root);
+    }
+    {   // A data folder given relative to the working directory (--data local/x) works like an absolute one.
+        World w; w.make();
+        Options relative = w.options();
+        relative.data_dir = fs::relative(w.data, fs::current_path());
+        CHECK(relative.data_dir.is_relative());
+        CHECK(run_setup(relative, w.runner(), report).rebuilt);  // the recompiler wrote where the config said, so the paths were absolute
+        CHECK(fs::is_regular_file(module_path(w.data, host)));
+        fs::remove_all(w.root);
+    }
+    {   // macOS without the command line tools must not run the cc/clang/gcc shims (they open an installer dialog).
+        World w; w.make(); w.no_developer_tools = true;
+        if (host.os == "macos") {
+            CHECK_ERROR(run_setup(w.options(), w.runner(), report), "No usable C compiler");
+            for (const auto& c : w.commands) CHECK(c.program != "cc" && c.program != "clang" && c.program != "gcc");
+        } else {
+            CHECK(run_setup(w.options(), w.runner(), report).rebuilt);  // elsewhere xcode-select is never asked
+            for (const auto& c : w.commands) CHECK(c.program != "xcode-select");
+        }
         fs::remove_all(w.root);
     }
     {   // The probe is the real-shape one only when recomp.h is beside the module sources.
@@ -445,6 +526,7 @@ int main(int argc, char** argv) {
         const std::string mode = argv[2];
         if (mode == "env") { const char* v = std::getenv("SC64_TEST_ENV"); return v && std::string(v) == "x y" ? 0 : 4; }
         if (mode == "print") { std::fputs("child stdout\n", stdout); std::fflush(stdout); std::fputs("child stderr\n", stderr); return 0; }
+        if (mode == "sleep") { std::this_thread::sleep_for(std::chrono::seconds(60)); return 0; }
         return 3;
     }
     argv0 = argv[0];

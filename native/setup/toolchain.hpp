@@ -42,8 +42,12 @@ std::string zig_target(const HostInfo& host);
 Toolchain zig_toolchain(const std::filesystem::path& zig, const HostInfo& host, const std::string& version,
                         const std::filesystem::path& cache_dir);
 
-// Compilers worth probing, in order: $CC (may carry arguments), then the usual names.
-std::vector<Toolchain> system_candidates(const HostInfo& host, const std::string& cc_env);
+// Compilers worth probing, in order: $CC (may carry arguments), then the usual names. Without
+// `shims`, the bare names cc, clang and gcc are left out (see macos_developer_tools).
+std::vector<Toolchain> system_candidates(const HostInfo& host, const std::string& cc_env, bool shims = true);
+// macOS only: whether the command line developer tools are installed. Without them /usr/bin/cc, clang
+// and gcc are xcode-select shims that open the system installer dialog when run, so they must not be probed.
+bool macos_developer_tools(const Runner& run, const std::filesystem::path& scratch);
 // Fills in kind/version and builds a tiny module the way the real one is built; nullopt if that fails.
 // `module_dir` holds the module sources (recomp.h, sections.h shim); the probe uses them when present.
 std::optional<Toolchain> probe(const Runner& run, Toolchain candidate, const HostInfo& host,

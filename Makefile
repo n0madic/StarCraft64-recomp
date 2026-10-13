@@ -10,6 +10,9 @@ ADB ?= adb
 JOBS ?= 8
 ROM ?=
 BUNDLE_ROM ?= 0
+ALLOW_DIRTY ?= 0
+FORCE ?= 0
+USE_ZIG ?= 0
 # 1 builds the Linux package in the pinned Docker image even on a Linux x86_64 host.
 DOCKER ?= 0
 SERIAL ?=

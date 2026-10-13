@@ -1,4 +1,5 @@
 #include "recipe.hpp"
+#include "process.hpp"
 #include "sha.hpp"
 #include <algorithm>
 #include <cctype>
@@ -27,7 +28,7 @@ std::string lower(std::string text) {
 
 std::string read_file(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
-    if (!stream) throw SetupError("Cannot read " + path.string());
+    if (!stream) throw SetupError("Cannot read " + path_utf8(path));
     return std::string(std::istreambuf_iterator<char>(stream), {});
 }
 
@@ -35,7 +36,7 @@ void write_file(const std::filesystem::path& path, std::string_view bytes) {
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);
     stream.write(bytes.data(), std::streamsize(bytes.size()));
     stream.close();
-    if (!stream) throw SetupError("Cannot write " + path.string());
+    if (!stream) throw SetupError("Cannot write " + path_utf8(path));
 }
 
 void copy_bytes(const std::filesystem::path& from, const std::filesystem::path& to) {
@@ -99,12 +100,8 @@ std::string render_config(std::string_view config_template, const std::filesyste
             throw SetupError("Config template must contain " + quoted + " exactly once");
         text.replace(at, quoted.size(), toml_string(value));
     };
-    const auto utf8 = [](const std::filesystem::path& path) {
-        const auto text = path.u8string();
-        return std::string(text.begin(), text.end());
-    };
-    replace_once("@ROM@", utf8(rom));
-    replace_once("@OUTPUT@", utf8(output));
+    replace_once("@ROM@", path_utf8(rom));
+    replace_once("@OUTPUT@", path_utf8(output));
     return text;
 }
 
@@ -112,14 +109,14 @@ Manifest load_recipe(const std::filesystem::path& directory, std::string_view ex
     const Manifest manifest = parse_manifest(read_file(directory / std::string(kManifestFile)), expected_rom_sha1);
     if (file_sha256(directory / std::string(kSymbolsFile)) != manifest.symbols_sha256 ||
         file_sha256(directory / std::string(kConfigFile)) != manifest.config_sha256)
-        throw SetupError("The recipe in " + directory.string() + " does not match its manifest; reinstall the application");
+        throw SetupError("The recipe in " + path_utf8(directory) + " does not match its manifest; reinstall the application");
     return manifest;
 }
 
 std::map<std::string, std::string> hash_directory(const std::filesystem::path& directory) {
     std::map<std::string, std::string> result;
     for (const auto& entry : std::filesystem::directory_iterator(directory))
-        if (entry.is_regular_file()) result[entry.path().filename().string()] = file_sha256(entry.path());
+        if (entry.is_regular_file()) result[path_utf8(entry.path().filename())] = file_sha256(entry.path());
     return result;
 }
 
@@ -154,7 +151,7 @@ void inspect_output(const std::filesystem::path& directory, std::string_view log
             throw SetupError(std::string("Recompiler output is incomplete: ") + required);
     }
     for (const auto& entry : std::filesystem::directory_iterator(directory)) {
-        const std::string name = entry.path().filename().string();
+        const std::string name = path_utf8(entry.path().filename());
         if (name.starts_with("funcs_") && name.ends_with(".c")) {
             ++functions;
             if (entry.file_size() == 0) throw SetupError("Recompiler output is incomplete: " + name);

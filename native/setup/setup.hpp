@@ -41,6 +41,9 @@ struct Result {
 };
 
 std::filesystem::path module_path(const std::filesystem::path& data_dir, const HostInfo& host);
+// True when <data>/game holds a module whose receipt matches the ROM, recipe, recompiler, module sources
+// and flags of `options` (the same test run_setup uses to do nothing). Never throws.
+bool module_is_current(const Options& options);
 // Throws SetupError with an actionable message. `run` runs every child process.
 Result run_setup(const Options& options, const Runner& run, const Reporter& report);
 }

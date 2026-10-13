@@ -42,6 +42,8 @@ from rom_info import MAGIC_FORMATS
 RUNTIME = ROOT / 'local/deps/N64ModernRuntime-shell'
 MACOS_DEPLOYMENT_TARGET = '13.0'
 RECOMPILERS = ROOT / 'local/dist/recompiler'
+RECIPE = ROOT / 'recipe/ntsc-u'
+PATCH_TOOL = ROOT / 'tools/recompile/patch_recompiler.py'
 DIST = ROOT / 'local/dist/launcher'
 REPORTS = ROOT / 'local/reports/launcher'
 TARGETS = {
@@ -123,9 +125,15 @@ def check_recompiler(target: str) -> Path:
     data = json.loads(receipt.read_text())
     if data.get('binary_sha256') != sha256(binary):
         raise PackageError(f'{receipt} describes another binary; rebuild it')
-    if not data.get('recipe_verification'):
-        raise PackageError(f'N64Recomp for {target} was never checked against the recipe; run '
-                           f'`python tools/sc64.py verify-recompiler --target {TARGETS[target]["recompiler"]}`')
+    command = f'`python tools/sc64.py verify-recompiler --target {TARGETS[target]["recompiler"]}`'
+    verification = data.get('recipe_verification')
+    if not verification:
+        raise PackageError(f'N64Recomp for {target} was never checked against the recipe; run {command}')
+    if verification.get('recipe_sha256') != sha256(RECIPE / 'generated.json'):
+        raise PackageError(f'N64Recomp for {target} was checked against a different recipe than the one being shipped; run {command}')
+    if data.get('source', {}).get('patch_tool_sha256') != sha256(PATCH_TOOL):
+        raise PackageError(f'N64Recomp for {target} was built with an older patch tool; rebuild it with '
+                           f'`python tools/sc64.py build-recompiler --target {TARGETS[target]["recompiler"]}` and verify it again')
     return binary
 
 
@@ -318,7 +326,7 @@ def main() -> None:
     args = parser.parse_args()
     host = hostenv.current()
     recompiler = check_recompiler(args.target)
-    files_text, info = notices.build()
+    files_text, info = notices.build(target=args.target)
     if info['dirty'] and not args.allow_dirty:
         raise PackageError('The working tree has uncommitted changes, so SOURCE.txt would not describe this build; '
                            'commit them or pass --allow-dirty')
