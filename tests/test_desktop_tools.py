@@ -397,6 +397,23 @@ class PackageLaunchTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertEqual(commands[0][0], str(package / name))
 
+    def test_game_module_edit_is_rejected_before_launch(self):
+        host = launcher.hostenv.Host('linux', 'x86_64')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            package = root / 'local/dist/StarCraft64-linux'
+            package.mkdir(parents=True)
+            (package / 'StarCraft64').write_bytes(b'binary')
+            (package / 'sc64-game.so').write_bytes(b'module')
+            receipt = root / 'local/reports/linux/build.json'
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text(json.dumps({'schema': 1, 'binary_sha256': launcher.sha256(package / 'StarCraft64'),
+                                           'files_sha256': launcher.resource_hashes(package)}))
+            (package / 'sc64-game.so').write_bytes(b'another module')
+            with mock_patch.object(launcher, 'ROOT', root), mock_patch.object(launcher.hostenv, 'current', return_value=host), \
+                    mock_patch.object(sys, 'argv', ['run', '--output', str(root / 'local/run')]):
+                with self.assertRaisesRegex(SystemExit, 'resources differ'): launcher.main()
+
     def test_package_edit_is_rejected_before_launch(self):
         host = launcher.hostenv.Host('linux', 'x86_64')
         with tempfile.TemporaryDirectory() as temporary:

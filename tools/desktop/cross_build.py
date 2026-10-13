@@ -36,8 +36,8 @@ from rom_info import MAGIC_FORMATS
 RUNTIME = ROOT / 'local/deps/N64ModernRuntime-shell'
 DOCKERFILE = ROOT / 'tools/desktop/linux-cross.Dockerfile'
 TARGETS = {
-    'windows': {'binary': 'StarCraft64.exe', 'profile': 'x86_64-windows', 'archive': '.zip'},
-    'linux': {'binary': 'StarCraft64', 'profile': 'x86_64-linux', 'archive': '.tar.gz'},
+    'windows': {'binary': 'StarCraft64.exe', 'module': 'sc64-game.dll', 'profile': 'x86_64-windows', 'archive': '.zip'},
+    'linux': {'binary': 'StarCraft64', 'module': 'sc64-game.so', 'profile': 'x86_64-linux', 'archive': '.tar.gz'},
 }
 TOOLCHAINS = {
     'mingw': ('cmake/toolchains/mingw-w64-x86_64.cmake', hostenv.MINGW_PREFIX + 'strip'),
@@ -139,6 +139,10 @@ def main() -> None:
         binary = staged / target['binary']
         shutil.copy2(build / target['binary'], binary)
         tools.run([plan.strip, '--strip-debug', binary])
+        # The game is a module beside the executable (ADR-086); sc64_app depends on it.
+        module = staged / target['module']
+        shutil.copy2(build / target['module'], module)
+        tools.run([plan.strip, '--strip-debug', module])
         shutil.copy2(bootstrap.FONT, staged / bootstrap.FONT.name)
         shutil.copy2(bootstrap.FONT_LICENSE, staged / 'LICENSE-DejaVu.txt')
         # A Linux executable cannot embed an icon; ship the PNG for launchers and desktop entries.
@@ -150,7 +154,7 @@ def main() -> None:
             raise RuntimeError(f'CMake did not record a C++ compiler under {build}')
         receipt = {'schema': 1, 'profile': target['profile'], 'build_type': args.build_type, 'cloud_upload': False,
                    'host': host.label, 'build_mode': plan.mode,
-                   'binary_sha256': sha256(binary), 'sdl3_version': bootstrap.SDL_VERSION,
+                   'binary_sha256': sha256(binary), 'game_module_sha256': sha256(module), 'sdl3_version': bootstrap.SDL_VERSION,
                    'sdl3_sha256': sha256(bootstrap.SDL_ARCHIVE), 'files_sha256': audit(members),
                    'toolchain': tools.output([compiler, '--version']).splitlines()[0],
                    'user_acceptance': False}

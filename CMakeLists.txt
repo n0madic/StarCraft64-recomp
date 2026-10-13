@@ -92,10 +92,18 @@ sc64_add_runtime("${SC64_RUNTIME_DIR}" "runtime")
 target_include_directories(librecomp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/native/runtime")
 target_include_directories(ultramodern PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/native/runtime")
 
-file(GLOB SC64_GAME_SOURCES CONFIGURE_DEPENDS "${SC64_GENERATED_DIR}/*.c")
-add_library(sc64_game STATIC ${SC64_GAME_SOURCES})
-target_include_directories(sc64_game PUBLIC "${SC64_GENERATED_DIR}" "${SC64_RUNTIME_DIR}/N64Recomp/include")
-target_compile_options(sc64_game PRIVATE -O2 -fno-strict-aliasing -ffp-contract=off -fexceptions)
+# The shell loads the game as a module (cmake/game_module.cmake, ADR-086); the capture host
+# still links the generated C statically, and SC64_STATIC_GAME does the same for the shell
+# (A/B timing against the module, and the Android linkage).
+option(SC64_STATIC_GAME "Link the generated game statically into the shell instead of loading a module" OFF)
+if(SC64_BUILD_SHELL AND NOT SC64_STATIC_GAME)
+    include(cmake/game_module.cmake)
+else()
+    file(GLOB SC64_GAME_SOURCES CONFIGURE_DEPENDS "${SC64_GENERATED_DIR}/*.c")
+    add_library(sc64_game STATIC ${SC64_GAME_SOURCES})
+    target_include_directories(sc64_game PUBLIC "${SC64_GENERATED_DIR}" "${SC64_RUNTIME_DIR}/N64Recomp/include")
+    target_compile_options(sc64_game PRIVATE -O2 -fno-strict-aliasing -ffp-contract=off -fexceptions)
+endif()
 
 add_executable(sc64_flash_test tests/native/test_flash_device.cpp native/runtime/flash_device.cpp)
 target_include_directories(sc64_flash_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/native/runtime")

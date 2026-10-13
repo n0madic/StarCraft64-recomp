@@ -1,6 +1,7 @@
 # SDL3 shell, shared by the desktop (root CMakeLists.txt) and Android profiles.
-# Expects sc64_game, sc64_gfx_core, librecomp and ultramodern, plus the guarded
-# shell runtime copy in SC64_RUNTIME_DIR. SDL is the pinned source release,
+# Expects sc64_gfx_core, librecomp and ultramodern, plus the guarded shell runtime copy
+# in SC64_RUNTIME_DIR. The game is either the loadable module sc64_game_module (desktop,
+# ADR-086; the shell loads it at run time) or the static library sc64_game (Android). SDL is the pinned source release,
 # linked statically; no system SDL is used.
 get_filename_component(SC64_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 set(SC64_TOOLCHAINS "${SC64_ROOT}/local/toolchains")
@@ -44,8 +45,48 @@ add_library(sc64_shell STATIC
 target_include_directories(sc64_shell PUBLIC "${SC64_ROOT}/native/shell" "${SC64_ROOT}/native/runtime"
     "${SC64_TOOLCHAINS}")
 target_compile_definitions(sc64_shell PUBLIC SC64_SDL_VERSION="3.4.18")
-target_link_libraries(sc64_shell PUBLIC sc64_game sc64_gfx_core sc64_scripts sc64_sha librecomp ultramodern
+if(TARGET sc64_game_module)
+    target_sources(sc64_shell PRIVATE ${SC64_ROOT}/native/shell/game_module.cpp)
+    # recomp.h comes with the generated game's static library otherwise.
+    target_include_directories(sc64_shell PUBLIC "${SC64_ROOT}/native/module" "${SC64_RUNTIME_DIR}/N64Recomp/include")
+else()
+    target_sources(sc64_shell PRIVATE ${SC64_ROOT}/native/shell/game_static.cpp)
+    target_include_directories(sc64_shell PUBLIC "${SC64_ROOT}/native/module")
+    target_link_libraries(sc64_shell PUBLIC sc64_game)
+endif()
+target_link_libraries(sc64_shell PUBLIC sc64_gfx_core sc64_scripts sc64_sha librecomp ultramodern
     SDL3::SDL3-static Threads::Threads)
+
+if(TARGET sc64_game_module AND NOT ANDROID)
+    # Loader test against synthetic modules built like the real one (shim headers, C only).
+    set(SC64_FIXTURE_VARIANTS good:"" bad_abi:FIXTURE_BAD_ABI bad_layout:FIXTURE_BAD_LAYOUT bad_rom:FIXTURE_BAD_ROM
+        refuse:FIXTURE_REFUSE no_init:FIXTURE_NO_INIT)
+    set(SC64_FIXTURE_FILES)
+    set(SC64_FIXTURE_TARGETS)
+    foreach(entry IN LISTS SC64_FIXTURE_VARIANTS)
+        string(REPLACE ":" ";" parts "${entry}")
+        list(GET parts 0 variant)
+        list(GET parts 1 define)
+        add_library(sc64_fixture_${variant} SHARED "${SC64_ROOT}/tests/native/fixtures/module_fixture.c")
+        set_target_properties(sc64_fixture_${variant} PROPERTIES PREFIX "" OUTPUT_NAME fixture-${variant} C_VISIBILITY_PRESET hidden
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fixtures" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fixtures")
+        target_include_directories(sc64_fixture_${variant} PRIVATE "${SC64_ROOT}/native/module"
+            "${SC64_ROOT}/native/module/include" "${SC64_RUNTIME_DIR}/N64Recomp/include")
+        target_compile_options(sc64_fixture_${variant} PRIVATE -fexceptions)
+        if(WIN32)
+            target_link_options(sc64_fixture_${variant} PRIVATE -static-libgcc)
+        endif()
+        if(NOT define STREQUAL "\"\"" AND NOT define STREQUAL "")
+            target_compile_definitions(sc64_fixture_${variant} PRIVATE ${define})
+        endif()
+        list(APPEND SC64_FIXTURE_FILES "$<TARGET_FILE:sc64_fixture_${variant}>")
+        list(APPEND SC64_FIXTURE_TARGETS sc64_fixture_${variant})
+    endforeach()
+    add_executable(sc64_game_module_test "${SC64_ROOT}/tests/native/test_game_module.cpp")
+    target_link_libraries(sc64_game_module_test PRIVATE sc64_shell)
+    add_dependencies(sc64_game_module_test ${SC64_FIXTURE_TARGETS})
+    add_test(NAME game_module COMMAND sc64_game_module_test ${SC64_FIXTURE_FILES} "${CMAKE_BINARY_DIR}/fixtures/absent")
+endif()
 
 if(ANDROID)
     add_library(sc64_app SHARED "${SC64_ROOT}/native/shell/app.cpp" "${SC64_ROOT}/native/android/platform.cpp")
@@ -85,4 +126,7 @@ else()
         set_target_properties(sc64_app PROPERTIES OUTPUT_NAME StarCraft64)
     endif()
     target_link_libraries(sc64_app PRIVATE sc64_shell)
+    if(TARGET sc64_game_module)
+        add_dependencies(sc64_app sc64_game_module)
+    endif()
 endif()

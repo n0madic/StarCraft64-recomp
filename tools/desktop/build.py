@@ -50,9 +50,10 @@ def publish_bundle(staged: Path, app: Path, previous: Path) -> None:
     for stale in app.parent.glob(BACKUP_PREFIX + '*' + PREVIOUS_SUFFIX):
         if stale.is_dir() and not stale.is_symlink(): shutil.rmtree(stale)
 
-def stage_resources(resources: Path) -> None:
-    """Shell resources: the overlay font, its license and, when generated, the app icon."""
+def stage_resources(resources: Path, module: Path) -> None:
+    """Shell resources: the overlay font, its license, the game module (ADR-086) and, when generated, the app icon."""
     resources.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(module, resources / module.name)
     shutil.copy2(FONT, resources / FONT.name)
     shutil.copy2(FONT_LICENSE, resources / 'LICENSE-DejaVu.txt')
     if icon := installed_icon('StarCraft64.icns'):
@@ -89,6 +90,7 @@ def main() -> None:
     run(['cmake', '-S', str(ROOT), '-B', str(build), '-G', 'Ninja', *configure])
     if args.configure_only:
         return
+    # sc64_app depends on the game module, so one target builds both.
     run(['cmake', '--build', str(build), '--target', 'sc64_app', '-j', str(args.jobs)])
     app = ROOT / 'local/dist/StarCraft64.app'
     app.parent.mkdir(parents=True, exist_ok=True)
@@ -100,7 +102,7 @@ def main() -> None:
         staged = Path(temporary) / 'StarCraft64.app'
         (staged / 'Contents/MacOS').mkdir(parents=True)
         shutil.copy2(build / 'sc64_app', staged / 'Contents/MacOS/SC64')
-        stage_resources(staged / 'Contents/Resources')
+        stage_resources(staged / 'Contents/Resources', build / 'sc64-game.dylib')
         plist = {
             'CFBundleExecutable': 'SC64', 'CFBundleIdentifier': 'com.nomadic.sc64.personal',
             'CFBundleName': 'StarCraft64', 'CFBundleDisplayName': 'StarCraft 64',
@@ -111,6 +113,7 @@ def main() -> None:
         (staged / 'Contents/Info.plist').write_bytes(plistlib.dumps(plist))
         build_receipt = {'schema': 2, 'profile': 'arm64-macos', 'host': host.label, 'build_type': args.build_type, 'cloud_upload': False,
             'binary_sha256': sha256(staged / 'Contents/MacOS/SC64'),
+            'game_module_sha256': sha256(staged / 'Contents/Resources/sc64-game.dylib'),
             'sdl3_version': SDL_VERSION, 'sdl3_sha256': sha256(SDL_ARCHIVE),
             'miniaudio_version': MINIAUDIO_VERSION, 'miniaudio_sha256': sha256(MINIAUDIO),
             'stb_truetype_sha256': sha256(STB_TRUETYPE),

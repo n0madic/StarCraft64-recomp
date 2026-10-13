@@ -18,10 +18,7 @@
 #include <iomanip>
 #include <stdexcept>
 
-extern "C" {
-#include "funcs.h"
-#include "recomp_overlays.inl"
-}
+#include "game_module.hpp"
 
 namespace sc64::desktop {
 namespace {
@@ -92,6 +89,7 @@ void Session::load_bundled(std::vector<std::uint8_t> rom, const std::filesystem:
 void Session::launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::path& storage, bool persist) {
     if (launched_) throw std::runtime_error("Runtime supports one session per process; restart to change ROM");
     runtime::validate_rom(rom, sha1);
+    game::load(storage);  // fails before any side effect when the game module is missing or mismatched
     std::filesystem::create_directories(storage);
     // Validate every user-owned input before process-wide side effects. The
     // save image may be malformed; failing here leaves no audio device open.
@@ -120,12 +118,13 @@ void Session::launch_rom(std::vector<std::uint8_t> rom, const std::filesystem::p
 void Session::start_runtime(std::vector<std::uint8_t> rom, const std::filesystem::path& storage) {
     raster = std::make_unique<gfx::RasterPool>(gfx::RasterPool::default_helpers());
     recomp::register_config_path(storage);
-    recomp::overlays::register_overlays({section_table, ARRLEN(section_table), ARRLEN(section_table)}, {nullptr, 0});
+    const auto& module = game::info();
+    recomp::overlays::register_overlays({module.sections, module.num_sections, module.num_sections}, {nullptr, 0});
     recomp::GameEntry game{};
     game.rom_hash = XXH3_64bits(rom.data(), rom.size());
     game.internal_name = "STARCRAFT64"; game.display_name = "StarCraft 64 NTSC-U";
     game.game_id = u8"sc64-ntsc-u"; game.is_enabled = true; game.save_type = recomp::SaveType::Flashram;
-    game.entrypoint_address = std::int64_t(std::int32_t(0x80000400)); game.entrypoint = recomp_entrypoint;
+    game.entrypoint_address = std::int64_t(std::int32_t(module.entrypoint_vram)); game.entrypoint = module.entrypoint;
     game.on_init_callback = [](std::uint8_t* rdram, recomp_context*) {
         runtime::initialize_guest_fpu();
         MEM_W(0, std::int64_t(std::int32_t(0x80000314))) = 1;
@@ -141,7 +140,7 @@ void Session::start_runtime(std::vector<std::uint8_t> rom, const std::filesystem
         auto* ctx=static_cast<recomp_context*>(context);
         const auto saved=*ctx;
         ctx->r4=target.x; ctx->r5=target.y;
-        sc64_resident_8000B988(ram,ctx);
+        game::info().minimap_set_position(ram,ctx);
         *ctx=saved;
         s.minimap_field=field;
         ++s.minimap_jumps;

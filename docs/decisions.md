@@ -2096,3 +2096,37 @@ binary-mode patch left the macOS hashes unchanged. The Linux and Windows checks 
 on real machines or with their native toolchains (D-058). The binaries themselves are not bit-reproducible
 and need not be; the contract is the hash of the generated C. Packaging them into a release and the
 launcher stages remain.
+
+## ADR-086 — The game is a loadable module, not part of the shell executable (ACCEPTED)
+
+**Context:** A launcher (ADR-084/085) ships a prebuilt shell and builds only the game on the
+user's machine. The shell touched the generated code in three places (the overlay section table,
+`recomp_entrypoint` and the minimap setter) and the game called 73 host functions (`os*_recomp`,
+`get_function`, `do_break`, `pause_self`, `switch_error`, `sc64_*` observers/polls). Linking the
+final executable per user would need the SDL/Cocoa frameworks and a linker with the macOS SDK
+(zig has none); a module of pure C needs only libc.
+
+**Decision:** `native/module/` defines the ABI. The module exports `sc64_module_init(const Sc64HostApi*)`
+and returns `Sc64ModuleInfo` (entrypoint, section tables, minimap setter, ROM SHA-1, struct
+sizes). The host passes one table of function pointers; `module_main.c` defines every name in
+`sc64_imports.def` as a trampoline through that table, so the module needs no symbols from the
+executable and no import library on Windows. Both sides expand the same X-macro list; adding an
+entry bumps `SC64_MODULE_ABI`. A shim `librecomp/sections.h` lets the module build without the
+runtime tree; the host rejects a module whose struct sizes differ from the real header.
+`game_module.cpp` loads it with `SDL_LoadObject` (never unloaded), validates ABI, layout and ROM
+SHA-1 and runs before the session's first side effect; `game_static.cpp` provides the same
+`Sc64ModuleInfo` for Android, which stays statically linked, as does the capture host.
+`cmake/game_module.cmake` builds `sc64_game_module` (`sc64-game.dylib/.so/.dll`); packages carry
+it beside the executable and the receipts bind its hash.
+
+**Consequences:** Host exceptions (`ultramodern::thread_terminated`) must cross module frames. A
+spike and the CTest `game_module` (synthetic modules, shim headers, exceptions thrown on the main
+and a worker thread) show they do on macOS (module built by a different compiler, with and
+without `-fexceptions`), Linux x86_64 (amd64 container) and Windows (mingw under Wine). The real
+game runs from the module on macOS (60.03 fields/s, no `ERROR:`) and in the Linux package; 31
+traced frames (fields 300-330, intro) from three module and three static runs are byte-identical.
+A trampoline costs 0.77 ns against 0.78 ns for a table call; the intro crosses the boundary about
+15 million times a second (guest wait loops) and process CPU time is the same (25.9-26.1 s against
+25.9-26.0 s in 25 s). Mission gameplay was not measured (D-059). The module is game-derived code
+and stays private like the old executable. The user-side build of the module, the setup tool
+and release packaging are later stages.

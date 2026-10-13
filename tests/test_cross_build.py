@@ -70,6 +70,26 @@ class ContainerTests(unittest.TestCase):
         self.assertEqual(contained.command(['strip', target])[-2:], ['strip', '/work/local/dist/x'])
 
 
+class ModulePackagingTests(unittest.TestCase):
+    def test_every_package_target_ships_its_game_module(self):
+        self.assertEqual({name: target['module'] for name, target in cross.TARGETS.items()},
+                         {'windows': 'sc64-game.dll', 'linux': 'sc64-game.so'})
+
+    def test_module_names_match_the_loader(self):
+        source = (ROOT / 'native/shell/game_module.cpp').read_text()
+        for target in cross.TARGETS.values():
+            self.assertIn(f'"{target["module"]}"', source)
+
+    def test_module_is_a_data_file_in_the_archive(self):
+        self.assertEqual(cross.tar_member(tarfile.TarInfo('StarCraft64-linux/sc64-game.so')).mode, 0o644)
+
+    def test_audit_hashes_the_module_with_the_other_members(self):
+        with tempfile.TemporaryDirectory() as directory:
+            module = Path(directory) / 'sc64-game.so'
+            module.write_bytes(b'\x7fELFmodule')
+            self.assertEqual(set(cross.audit([module])), {'sc64-game.so'})
+
+
 class ReceiptHelperTests(unittest.TestCase):
     def test_configured_compiler_reads_the_detection_file(self):
         with tempfile.TemporaryDirectory() as directory:

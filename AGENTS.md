@@ -55,6 +55,8 @@ User-facing discussion is normally Russian. All project documentation is English
 - `native/shell/`: SDL3 application (`app.cpp`), session, lifecycle, audio, mailbox,
   ROM import, presentation selection (`native.cpp`), video/overlay, host scripts.
 - `native/shell/input/`: SDL-free gesture/menu/HUD/minimap/touch-pad adapters.
+- `native/module/`: the game-module ABI (`sc64_module.h`, `sc64_imports.def`), `module_main.c`
+  and the shim `librecomp/sections.h`; the generated C is built into `sc64-game.*` (ADR-086).
 - `native/android/`: NDK profile, manifest, `Sc64Activity` and haptics JNI helper.
 - `cmake/`: shared shell build (`shell.cmake`) and cross toolchain files.
 - `tools/sc64.py` (cross-platform command entry point, ADR-082) and `tools/hostenv.py`

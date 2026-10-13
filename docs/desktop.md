@@ -96,14 +96,23 @@ copy `local/deps/N64ModernRuntime-shell`, validate the generated observers and
 link statically against the pinned SDL source. The Stage 1 capture host keeps its
 own runtime copy and is excluded from shell builds.
 
-Outputs contain the executable, the DejaVu font and its license — **no ROM file**.
+Outputs contain the executable, the game module, the DejaVu font and its license — **no ROM file**.
+The game is not linked into the executable (ADR-086): `sc64-game.dylib` (inside the app's
+`Contents/Resources`), `sc64-game.so` or `sc64-game.dll` sits beside it. The shell looks for the
+module in `$SC64_GAME_MODULE`, beside its resources and in `<storage>/game/`, checks its ABI,
+struct layout and ROM SHA-1 before touching storage or audio, and otherwise prints the places it
+searched. The module is built from `local/generated/game` by the `sc64_game_module` target
+(plain C, needs only libc) and, like the old executable, is game-derived and stays private.
+Android and the capture host still link the game statically (`-DSC64_STATIC_GAME=ON` does the
+same for a desktop tree).
 `make icon ROM=/path/game.z64` first converts the original title art into
 `local/icons/` (ADR-076); builds then add the icon (macOS `.icns`, Windows
 resource, Linux `StarCraft64.png` beside the binary) and skip it when absent. The
 `.icns` is made with `iconutil`, so it exists only when icons are generated on macOS.
 New bundles/packages are staged completely before publication; a running
 executable is not truncated. Receipts: `local/reports/desktop/build.json`
-(schema 2), `local/reports/{windows,linux}/build.json` (schema 1).
+(schema 2), `local/reports/{windows,linux}/build.json` (schema 1); both record
+`game_module_sha256`, and the launcher refuses a package whose module differs from it.
 
 ### Linux AppImage
 

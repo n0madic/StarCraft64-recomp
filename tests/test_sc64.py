@@ -110,8 +110,11 @@ class RunAndTestTests(unittest.TestCase):
 
     def test_native_test_list_matches_cmake(self):
         cmake = (ROOT / 'CMakeLists.txt').read_text()
+        shell = (ROOT / 'cmake/shell.cmake').read_text()
         for target in driver.NATIVE_TEST_TARGETS:
-            if target not in ('sc64_host_telemetry_test', 'sc64_loop_watch_test'):
+            if target == 'sc64_game_module_test':
+                self.assertIn(f'add_executable({target} ', shell)
+            elif target not in ('sc64_host_telemetry_test', 'sc64_loop_watch_test'):
                 self.assertIn(target[len('sc64_'):-len('_test')], cmake, target)
 
 

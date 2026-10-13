@@ -62,9 +62,10 @@ native/
   host/            # Stage 1 capture host (own runtime copy)
   shell/           # SDL3 app, session, audio, presentation, scripts, platform
     input/         # SDL-free pointer/controller adapters
+  module/          # game-module ABI, trampolines and shim headers (ADR-086)
   android/         # NDK profile, manifest, platform JNI, Java activity/haptics
 recipe/ntsc-u/     # committed recompilation recipe: symbols, config template, generated-file hashes (ADR-084)
-cmake/             # shell.cmake, toolchains/{mingw-w64,linux}-x86_64.cmake
+cmake/             # shell.cmake, game_module.cmake, toolchains/{mingw-w64,linux}-x86_64.cmake
 tools/             # sc64.py (command entry point), hostenv.py (host/tool discovery), research, recompile, renderer, desktop, input, android
 tests/             # Python tool tests; native/ C++ fixtures
 local/             # ignored: toolchains, deps, generated, build, dist, reports, private
