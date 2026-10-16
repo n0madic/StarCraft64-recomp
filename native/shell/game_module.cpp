@@ -146,18 +146,23 @@ void prepare_staging() {
 
 std::string missing_message(const std::vector<std::filesystem::path>& places, const std::filesystem::path& staged,
                             bool refused_by_version, std::string_view import_error) {
-    std::string message = "The game module " + module_file_name() + " was not found. Looked in:";
-    for (const auto& place : places) message += "\n  " + utf8(place);
+    std::string message = "The game module " + module_file_name() + " was not found.";
     if (!import_error.empty()) message += "\n" + std::string(import_error);
-    constexpr const char* build = "build it on a computer from your ROM (make setup-game MODULE_TARGET=android-arm64)";
-    if (staged.empty() && refused_by_version)
-        message += std::string("\nChoose it with the Select game module button (") + build +
-                   "). Copying it to shared storage is not used on Android 10 or older.";
-    else if (!staged.empty())
-        message += std::string("\nChoose it with the Select game module button (") + build + "), or copy sc64-game.so to\n  " +
-                   utf8(staged) + "\n(adb push) and start the application again.";
-    else
-        message += "\nBuild it from your ROM (docs/desktop.md) and place it beside the application or in the game folder above.";
+    // The Android text applies where a staging folder exists or the OS is too old for one (the arguments say so).
+    if (!staged.empty() || refused_by_version) {
+        // A release user has no repository and no make: the steps use only the desktop launcher package and this screen.
+        message += "\nThe phone cannot build it. On a computer with the Android NDK run once"
+                   "\n(sc64_setup is in the desktop launcher package):"
+                   "\n  sc64_setup --rom your.z64 --target android-arm64"
+                   "\nCopy the " + module_file_name() + " it names to this phone, press Select game module,"
+                   "\npick that file, then press Select ROM.";
+        if (!staged.empty()) message += "\nOr adb push it to " + utf8(staged) + " and start the application again.";
+        else message += "\nCopying it to shared storage is not used on Android 10 or older.";
+    } else {
+        message += "\nBuild it from your ROM (docs/desktop.md) and place it beside the application or in the game folder below.";
+    }
+    message += "\nLooked in:";
+    for (const auto& place : places) message += "\n  " + utf8(place);
     return message;
 }
 

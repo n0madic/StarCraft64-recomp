@@ -94,6 +94,28 @@ make setup-game ROM="/path/to/your.z64"          # or: sc64_setup --rom PATH
 The ROM is copied into the app's private storage and reused on later launches. Details,
 logs and options (`USE_ZIG=1`, `DATA_DIR=...`, `FORCE=1`) are in the [desktop guide](docs/desktop.md).
 
+**Android (launcher APK).** A phone cannot build the game, so the game module is built on a computer
+first, from the same desktop launcher package as above. The order matters: module first, ROM second.
+
+1. On the computer, install the Android NDK (Android Studio's SDK manager, or `sdkmanager "ndk;29.0.14206865"`,
+   the version tested in [Android](docs/android.md)) and build the module for the phone from your ROM:
+
+   ```sh
+   sc64_setup --rom /path/to/your.z64 --target android-arm64    # --ndk PATH if the NDK is not found
+   ```
+
+   It prints the path of `sc64-game.so` (`<storage>/game-android-arm64/`). The file is made from your ROM:
+   keep it private and never publish it.
+2. Install `StarCraft64-<version>-launcher-android-arm64.apk` from the release (sideload; Android 9+, arm64).
+   From a repository checkout use `make build-android-launcher` and `make install-android ANDROID_LAUNCHER=1 SERIAL=...`.
+3. Copy `sc64-game.so` to the phone. In the app press **Select game module** and pick it; the app checks the file and
+   keeps its own copy.
+4. Press **Select ROM** and pick your NTSC-U ROM. The game starts.
+
+Without a module the app says so and lists these steps. `adb` is optional (`make push-android-module`, see
+[Android](docs/android.md)). The module is rebuilt only when a new application version changes it; install the new
+module the same way.
+
 **3. Developer builds.** `make recompile` generates the game C into the ignored
 `local/generated/game` and is what `make build` (and the Android APK, which still
 links the game statically) uses. Run `make venv` first (the pinned
@@ -135,7 +157,7 @@ Add `BUNDLE_ROM=1 ROM="/path/to/your.z64"` to `make build-appimage` to pack the 
 and start straight into the game (`StarCraft64-x86_64-bundled-rom.AppImage`); like the
 bundled APK it is strictly personal.
 
-On Android, the start screen has a "Select ROM" button that opens the system picker (the launcher APK also has "Select game module").
+On Android, the start screen has a "Select ROM" button that opens the system picker (the launcher APK also has "Select game module"; see the Android steps above).
 To skip the picker, build with `BUNDLE_ROM=1 ROM="/path/to/your.z64"`; the ROM is
 then packed into that APK, which makes it strictly personal and never shareable.
 For an Android emulator use `make build-android-opengles` instead (the default

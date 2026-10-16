@@ -173,12 +173,14 @@ void test_staging_policy() {
     CHECK(game::staging_directory(34, nullptr).empty() && game::staging_directory(34, "").empty());
     const std::vector<fs::path> places = {"/data/game/sc64-game.so"};
     const auto android = game::missing_message(places, "/sdcard/files", false, "");
-    for (const char* part : {"was not found", "/data/game/sc64-game.so", "make setup-game MODULE_TARGET=android-arm64", "/sdcard/files", "adb push",
-                             "Select game module"})
+    for (const char* part : {"was not found", "/data/game/sc64-game.so", "sc64_setup --rom your.z64 --target android-arm64", "/sdcard/files", "adb push",
+                             "Select game module", "Select ROM", "launcher package"})
         CHECK(android.find(part) != std::string::npos);
     const auto old_android = game::missing_message(places, {}, true, "");
     CHECK(old_android.find("Android 10") != std::string::npos && old_android.find("adb push") == std::string::npos);
     CHECK(old_android.find("Select game module") != std::string::npos);
+    // A release user has no repository: nothing in the message may require make or a checkout.
+    CHECK(android.find("make ") == std::string::npos && old_android.find("make ") == std::string::npos);
     const auto desktop = game::missing_message(places, {}, false, "");
     CHECK(desktop.find("docs/desktop.md") != std::string::npos && desktop.find("Android") == std::string::npos);
     CHECK(game::missing_message(places, "/sdcard/files", false, "Cannot access the staged module").find("Cannot access the staged module") != std::string::npos);
