@@ -3,6 +3,7 @@ import importlib.util
 import json
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -75,7 +76,7 @@ class Workspace(unittest.TestCase):
         shutil.rmtree(analysis, ignore_errors=True)
         analysis.mkdir()
         (analysis / 'sc64.syms.toml').write_text(SYMS)
-        (analysis / 'sc64-ui.toml').write_text(CONFIG)
+        (analysis / 'sc64-ui.toml').write_bytes(CONFIG.encode('utf-8'))
         generated = self.directory / 'generated'
         shutil.rmtree(generated, ignore_errors=True)
         files = write_generated(generated)
@@ -93,6 +94,24 @@ class Workspace(unittest.TestCase):
 
 
 class CommittedRecipeTests(unittest.TestCase):
+    def test_git_checkout_keeps_recipe_lf_with_autocrlf(self):
+        if not shutil.which('git'):
+            self.skipTest('git unavailable')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(['git', 'init', '-q', str(root)], check=True)
+            shutil.copy2(ROOT / '.gitattributes', root / '.gitattributes')
+            destination = root / 'recipe/ntsc-u'
+            destination.mkdir(parents=True)
+            for name in ('sc64.toml', 'sc64.syms.toml'):
+                shutil.copy2(recipe.RECIPE / name, destination / name)
+            subprocess.run(['git', '-C', str(root), '-c', 'core.autocrlf=true', 'add', '.'], check=True, capture_output=True)
+            checkout = root / 'checkout'
+            checkout.mkdir()
+            subprocess.run(['git', '-C', str(root), '-c', 'core.autocrlf=true', 'checkout-index', '--all', '--prefix', str(checkout) + '/'], check=True)
+            for name in ('sc64.toml', 'sc64.syms.toml'):
+                self.assertEqual((checkout / 'recipe/ntsc-u' / name).read_bytes(), (recipe.RECIPE / name).read_bytes())
+
     def test_committed_recipe_is_whitelisted_metadata_with_matching_hashes(self):
         manifest = recipe.check()
         self.assertEqual(manifest['rom_sha1'], 'a36d91b5aac7bb95df0d7de5f9814f5270e25c2b')
@@ -114,6 +133,15 @@ class WhitelistTests(Workspace):
 
     def test_exported_recipe_passes(self):
         self.assertEqual(set(recipe.check(self.make_recipe())['files']), set(GENERATED))
+
+    def test_export_writes_hashable_lf_bytes_and_rejects_crlf_changes(self):
+        directory = self.make_recipe()
+        path = directory / 'sc64.toml'
+        data = path.read_bytes()
+        self.assertNotIn(b'\r\n', data)
+        path.write_bytes(data.replace(b'\n', b'\r\n'))
+        with self.assertRaisesRegex(SystemExit, 'does not match'):
+            recipe.check(directory)
 
     def test_nonzero_instruction_patch_is_rejected(self):
         directory = self.edit('sc64.toml', lambda text: text.replace('value = 0', 'value = 3'))

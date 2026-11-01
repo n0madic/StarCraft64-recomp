@@ -1,0 +1,2 @@
+# Recipe hashes cover exact bytes, including line endings.
+/recipe/ntsc-u/*.toml text eol=lf
