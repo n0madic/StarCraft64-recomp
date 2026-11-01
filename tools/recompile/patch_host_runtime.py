@@ -228,7 +228,7 @@ static size_t sc64_pending_cleanup = 0;""")
 
     # Validate all anchors before changing any file.
     for name, text in changes.items():
-        (runtime / name).write_text(text)
+        (runtime / name).write_bytes(text.encode('utf-8'))
     manifest = {name: hashlib.sha256((runtime / name).read_bytes()).hexdigest() for name in changes}
     marker.write_text(json.dumps({"patched_sha256": manifest,
         "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}, indent=2) + "\n")

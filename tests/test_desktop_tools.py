@@ -78,7 +78,7 @@ class LiveGateTests(unittest.TestCase):
             root = Path(temporary).resolve()
             output = root / 'local/report'
             output.mkdir(parents=True)
-            (output / 'engine.log').write_text(log)
+            (output / 'engine.log').write_bytes(log.encode('utf-8'))
             receipt = {'schema': 3, 'log_sha256': hashlib.sha256(log.encode()).hexdigest(), 'exit_code': 0,
                        'binary_unchanged': True, 'build': {'binary_sha256': 'test', 'profile': 'arm64-macos'},
                        'resume_requested': resume_requested}
@@ -149,7 +149,7 @@ class DesktopPatchTests(unittest.TestCase):
         for name, content in files.items():
             file = source / name
             file.parent.mkdir(parents=True, exist_ok=True)
-            file.write_text(content)
+            file.write_bytes(content.encode('utf-8'))
         (source / 'sc64-host-patch.json').write_text(json.dumps({'patched_sha256': {
             name: hashlib.sha256(data.encode()).hexdigest() for name, data in files.items()
             if name.startswith('ultramodern/') or name == 'librecomp/src/recomp.cpp'}}))

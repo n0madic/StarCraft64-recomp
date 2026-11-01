@@ -54,7 +54,7 @@ class HostPatchTests(unittest.TestCase):
             target = runtime / name
             target.parent.mkdir(parents=True, exist_ok=True)
             if name == "ultramodern/src/events.cpp":
-                target.write_text(DEVICE.patch_events(original.decode()))
+                target.write_bytes(DEVICE.patch_events(original.decode()).encode('utf-8'))
             else:
                 target.write_bytes(original)
         events = "ultramodern/src/events.cpp"
@@ -77,6 +77,7 @@ class HostPatchTests(unittest.TestCase):
             self.apply_fixture(runtime)
             names = json.loads((runtime / "sc64-host-patch.json").read_text())["patched_sha256"]
             first = {name: (runtime / name).read_bytes() for name in names}
+            self.assertEqual({name: hashlib.sha256(data).hexdigest() for name, data in first.items()}, names)
             self.apply_fixture(runtime)
             self.assertEqual(first, {name: (runtime / name).read_bytes() for name in names})
 
