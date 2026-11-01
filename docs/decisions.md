@@ -2418,3 +2418,19 @@ not a trace. `run.py` treats a run as interactive only when it has no `--seconds
 
 **Consequences:** `make run` is quiet; an evidence run's log is unchanged except for the `DEBUG:` prefix, which the checkers
 (they look for `SC64 {` anywhere in a line) do not depend on. Other consumers of those lines must request debug.
+
+## ADR-093 — Wait for the VI deadline on Windows
+
+**Context:** A Windows UCRT64 build generated thousands of VI callbacks per second. A bounded intro run
+recorded 4,391 callbacks at 5.18 seconds and 11,222 at 10.19 seconds. Instrumentation showed repeated
+callbacks with the same scheduled field when the deadline was less than a millisecond away.
+
+**Decision:** The guarded shell-runtime patch uses signed operands for the VI deadline calculation and
+waits until that deadline, rounding positive sleeps up to whole milliseconds and rechecking after waking.
+This prevents a short sleep returning early from issuing a second callback for the same deadline. The
+guest clock remains independent of presentation. The upstream and capture-host trees are not modified.
+
+**Consequences:** A 15-second Windows intro smoke run recorded 298, 598 and 898 callbacks at approximately
+5, 10 and 15 seconds, with video and audio initialized and no reported audio underruns. This is not a
+physical input or mission acceptance test. The deadline may overshoot by the host scheduler's sleep
+granularity; lifecycle and other platforms still need their own runtime checks.
