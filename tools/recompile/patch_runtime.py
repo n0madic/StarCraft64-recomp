@@ -156,7 +156,7 @@ def prepare(source: Path, destination: Path) -> None:
     if not destination.exists():
         shutil.copytree(source, destination, ignore=shutil.ignore_patterns(".git", "build", "__pycache__"))
     for relative, content in patched.items():
-        (destination / relative).write_text(content)
+        (destination / relative).write_bytes(content.encode('utf-8'))
     manifest = {"upstream_revision": PIN, "original_sha256": HASHES, "patched_sha256": {
         relative: hashlib.sha256(content.encode()).hexdigest() for relative, content in patched.items()
     }}

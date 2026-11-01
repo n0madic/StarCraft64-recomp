@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -39,6 +40,9 @@ class RuntimePatchTests(unittest.TestCase):
             with patch.object(MODULE.subprocess, "check_output", return_value=MODULE.PIN + "\n"):
                 MODULE.prepare(source, destination)
                 first = {name: (destination / name).read_bytes() for name in MODULE.HASHES}
+                manifest = json.loads((destination / '.sc64-device-patch.json').read_text())
+                for name, digest in manifest['patched_sha256'].items():
+                    self.assertEqual(hashlib.sha256((destination / name).read_bytes()).hexdigest(), digest)
                 (destination / "host-owned.txt").write_text("preserve\n")
                 MODULE.prepare(source, destination)
             self.assertEqual(first, {name: (destination / name).read_bytes() for name in MODULE.HASHES})
