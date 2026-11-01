@@ -2418,3 +2418,88 @@ not a trace. `run.py` treats a run as interactive only when it has no `--seconds
 
 **Consequences:** `make run` is quiet; an evidence run's log is unchanged except for the `DEBUG:` prefix, which the checkers
 (they look for `SC64 {` anywhere in a line) do not depend on. Other consumers of those lines must request debug.
+
+## ADR-094 — Faster mouse cursor following
+
+**Context:** Mouse movement in a mission steers the original game cursor through
+the controller. The hover cap of 8 native pixels per guest field and a three-field
+prediction horizon add conspicuous travel time even when the host pointer moves
+immediately. A player reported severe lag following a Windows build.
+
+**Decision:** Mouse hover uses the existing action steering profile: a 16 px/field
+cap, horizon 1 and snapshot-age gain 1.5. Touch, queued clicks and drag profiles,
+arrival guards, stale-feedback checks and guest memory are unchanged.
+
+**Consequences:** Synthetic cursor simulations cover changed targets, delayed
+snapshots and convergence; the first long step exceeds the old 8 px/field cap.
+The original stick still limits cursor speed, and stale frames can still add lag.
+A Windows player reported that the later direct-input and presentation changes majorly improved mouse responsiveness; cross-platform responsiveness and overshoot remain unverified.
+
+## ADR-095 — Experimental direct mouse hover through the original cursor setter
+
+**Context:** A Windows mission diagnostic still showed objectionable cursor lag after ADR-094.
+The original stick has a finite speed and cursor snapshots in that recording were typically two
+guest fields old; some arrived out of order. The NTSC-U resident function at `0x80037FE0` sets
+both the float cursor coordinates and the two integer coordinate pairs used by the game.
+
+**Decision:** For unclaimed mouse hover in the guarded 1P mission only, queue the latest native
+pointer target for the guest's existing `0x8001AE94` input-query hook. There, on the guest thread,
+call the original setter with the full guest context saved and restored. Fence the request by age,
+coordinate bounds, live mode/player/modal state and exact instructions at the setter and query.
+Suppress analog hover only after a setter call is acknowledged; otherwise retain stick steering.
+Keyboard/gamepad, menus, HUD, minimap, queued clicks and drags retain their existing ownership.
+
+**Consequences:** This is a gameplay-affecting experiment, not acceptance: the original function
+modifies guest cursor state. Synthetic tests cover request guards, hook routing, fallback and
+controller arbitration. A Windows intro smoke test does not prove the direct path is reached in
+a mission or that selection, dragging, edge scrolling and HUD behavior remain correct; those
+require user verification. A 45-second Windows background-input recipe on a copied private save
+reached the mission: hover targets (250,100) and (80,140) were followed by matching owned cursor
+snapshots, and the log reported the direct path active. The later advisor message disabled it. The
+run exited zero but recorded one audio underrun; it does not prove physical mouse delivery,
+selection/drag behavior, lifecycle or perceptual audio. Its private log is
+`local/dist/windows-direct-mouse/route-proof.log`. This change does not claim touch or multiplayer support.
+
+## ADR-096 — Opt-in low-latency presentation experiment
+
+**Context:** A user reported improved but still perceptible mouse lag with ADR-095. The SDL shell
+polls input once per presentation loop, and the default renderer requests VSync, so blocking
+in present can add to the guest input and frame pipeline. Its contribution was not measured.
+
+**Decision:** For a separate local experiment only, `sc64.low_latency_present=1` requests VSync
+off and caps SDL's generic callback loop at 240 Hz. The default remains VSync on. Guest VI timing,
+rasterization, task completion and input ownership remain unchanged. The shell logs the requested
+and reported VSync state. SDL 3.4.18's Windows D3D11 backend maps interval zero to Present1's
+zero sync interval, and its generic main loop honors `SDL_HINT_MAIN_CALLBACK_RATE`.
+
+**Consequences:** A Windows D3D11 45-second background-input recipe reported VSync 0, reached
+the mission, activated direct hover, and exited zero; one audio underrun was reported. This is
+not a measured latency improvement, physical-input acceptance, visual tear assessment, full
+graphics parity gate or evidence for other SDL backends. Unsynchronized presentation can tear,
+increase power use or behave differently under the desktop compositor. The ordinary build is
+still available for comparison.
+
+## ADR-097 — Direct mouse actions and edge scrolling
+
+**Context:** After ADR-095/096, a Windows player reported that top-edge scrolling stopped,
+selection dragging was jerky, and the cursor lagged again during rapid contextual orders.
+The direct path covered hover only; actions and drags returned to stick steering, and a
+stationary direct cursor did not push the original controller against an edge.
+
+**Decision:** Mouse-origin queued map actions and started selection drags may use the same
+guarded guest cursor setter as hover, retaining the existing feedback-based arrival checks,
+button holds and neutral gaps. While an action owns the guest cursor its target is not
+replaced by later pointer movement. Subsequent mouse hover is retained, and can resume during
+neutral gaps or after six fields of a mouse B pulse. Mouse hover at a viewport edge sends the
+original Z+stick camera control while keeping the cursor positioned at the edge. Pixel-centre
+inversion clamps in-viewport edge pixels to the native image; raw letterbox hit tests remain
+unclamped. Leaving the image or window clears mouse hover so edge scrolling stops. Touch,
+controller, HUD and menu ownership stay on their existing paths.
+
+**Consequences:** Windows background-input recipes with a copied save moved the camera from
+Y=800 to Y=-16 at the top edge, held A across a selection drag through its final target, and
+submitted three separate B pulses at their respective cursor targets before returning to a
+new hover position. These recipes bypass OS pointer delivery and do not prove visual smoothness,
+selection semantics or physical scrolling; user verification is pending. Each run recorded one
+audio underrun during startup. Private logs are `local/dist/windows-mouse-fixes/top-edge.log`,
+`local/dist/windows-mouse-fixes/drag-proof.log` and `local/dist/windows-mouse-controls/right-clicks-final.log`.

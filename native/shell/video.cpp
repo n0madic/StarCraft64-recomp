@@ -139,16 +139,21 @@ void Font::draw(SDL_Renderer* renderer, const std::string& text, float cx, float
 
 Video::~Video() { destroy(); }
 
-void Video::create(SDL_Window* window, const std::string& driver, const std::string& font, const std::string& icon) {
+void Video::create(SDL_Window* window, const std::string& driver, const std::string& font, const std::string& icon,
+                   bool vsync) {
     window_ = window; font_path_ = font; icon_path_ = icon;
     SDL_PropertiesID properties = SDL_CreateProperties();
     SDL_SetPointerProperty(properties, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, window);
     if (!driver.empty()) SDL_SetStringProperty(properties, SDL_PROP_RENDERER_CREATE_NAME_STRING, driver.c_str());
-    SDL_SetNumberProperty(properties, SDL_PROP_RENDERER_CREATE_PRESENT_VSYNC_NUMBER, 1);
+    SDL_SetNumberProperty(properties, SDL_PROP_RENDERER_CREATE_PRESENT_VSYNC_NUMBER, vsync ? 1 : 0);
     renderer_ = SDL_CreateRendererWithProperties(properties);
     SDL_DestroyProperties(properties);
     if (!renderer_) fail("Renderer creation failed");
     log::info("SC64 presentation initialized through SDL renderer %s", name().c_str());
+    int actual_vsync = -1;
+    if (!SDL_GetRenderVSync(renderer_, &actual_vsync) || actual_vsync != (vsync ? 1 : 0))
+        log::warning("SC64 requested presentation VSync %d, actual %d: %s", int(vsync), actual_vsync, SDL_GetError());
+    else log::info("SC64 presentation VSync %d", actual_vsync);
     // SDL tries a comma-separated list in order; say so when the first choice failed.
     const std::string requested = driver.substr(0, driver.find(','));
     if (!requested.empty() && SDL_strcasecmp(requested.c_str(), name().c_str()) != 0)

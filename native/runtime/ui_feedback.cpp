@@ -1,6 +1,7 @@
 #include "ui_feedback.hpp"
 #include "guest_addresses.hpp"
 #include "minimap.hpp"
+#include "cursor_target.hpp"
 #include <recomp.h>
 #include <algorithm>
 #include <mutex>
@@ -21,6 +22,7 @@ bool briefing_active = false;
 thread_local bool b_hint_pending = false;
 bool hud_complete = false;
 std::atomic<sc64::runtime::MinimapHandler> minimap_handler{nullptr};
+std::atomic<sc64::runtime::CursorHandler> cursor_handler{nullptr};
 bool address(std::uint32_t a, unsigned length) {
     return a >= 0x80000000 && a <= 0x80800000 - length;
 }
@@ -55,8 +57,17 @@ sc64::runtime::MinimapInbox& sc64::runtime::minimap_input() {
     return inbox;
 }
 void sc64::runtime::set_minimap_handler(MinimapHandler handler) { minimap_handler=handler; }
+sc64::runtime::CursorInbox& sc64::runtime::cursor_input() {
+    static CursorInbox inbox;
+    return inbox;
+}
+void sc64::runtime::set_cursor_handler(CursorHandler handler) { cursor_handler=handler; }
 
 extern "C" void sc64_ui_pick(std::uint8_t* ram, recomp_context* ctx, unsigned kind) {
+    if (kind == 0) if (auto handler = cursor_handler.load()) {
+        // The handler verifies the request age against the live guest field.
+        handler(ram, ctx);
+    }
     if (kind==0) if (auto handler=minimap_handler.load()) {
         if (auto target=sc64::runtime::minimap_input().take(sc64::runtime::read_minimap({ram,0x800000},3)))
             handler(ram,ctx,*target);

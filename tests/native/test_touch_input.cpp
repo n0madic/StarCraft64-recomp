@@ -49,6 +49,8 @@ struct MockNative final : NativeApi {
     std::pair<double, double> size{960, 720};
     struct Submitted { unsigned bits; double x, y; };
     std::optional<Submitted> submitted;
+    std::optional<Point> direct_mouse;
+    bool direct_accepted = false;
     struct Vibration { int ms, amplitude; };
     std::vector<Vibration> vibrations;
     std::optional<bool> haptics_enabled;
@@ -91,6 +93,10 @@ struct MockNative final : NativeApi {
         if (player == 1) submitted = Submitted{buttons, x, y};
     }
     bool navigate_minimap(double, double, double, double) override { return false; }
+    bool position_mouse_cursor(std::optional<Point> point, double) override {
+        direct_mouse = point;
+        return point.has_value() && direct_accepted;
+    }
     void set_cursor_hidden(const std::optional<std::array<double, 4>>& region) override { cursor_hidden = region; }
     void vibrate(int milliseconds, int amplitude) override { vibrations.push_back({milliseconds, amplitude}); }
     void set_haptics(bool enabled) override { haptics_enabled = enabled; }
@@ -244,6 +250,8 @@ int main() {
         CHECK(!viewport::to_native(r, 1680, 60));
         r = viewport::rectangle(1000, 700, 320, 240);
         CHECK(r->width == 933 && r->height == 700);
+        const auto top_left = viewport::to_native(r, r->x, r->y + r->height - 1).value();
+        CHECK(top_left.x == 0 && top_left.y == 0);
         CHECK(!viewport::rectangle(0, 700, 320, 240));
     }
 
@@ -307,6 +315,74 @@ int main() {
         // Substitute: final releases the host's cursor-hiding hook.
         CHECK(!native.cursor_hidden);
     }
+    // Direct mouse hover is suppressed until the native side confirms that the
+    // guest setter ran; a controller or queued action takes ownership again.
+    {
+        Shared state;
+        state.pad.enabled = false;
+        MockNative host_native;
+        auto& gi = host_native.guest;
+        gi.running = true; gi.fields = 20; gi.cursor_field = 20; gi.cursor_valid = true;
+        gi.cursor_x = 100; gi.cursor_y = 100; gi.cursor_divisor = 200;
+        gi.width = 320; gi.height = 240; gi.ui_mode = "game"; gi.ui_field = 20;
+        HostScript host(state, host_native, config);
+        host.init();
+        set_target(state.gestures, 250, 100);
+        host.update(1.0 / 60);
+        CHECK(host_native.direct_mouse && host_native.submitted->x != 0);
+        host_native.direct_accepted = true;
+        host.update(1.0 / 60);
+        CHECK(host_native.direct_mouse && host_native.submitted->x == 0);
+        set_target(state.gestures, 160, 0);
+        host.update(1.0 / 60);
+        CHECK(host_native.submitted->bits == button_z && host_native.submitted->y > 0);
+        set_target(state.gestures, 160, 239);
+        host.update(1.0 / 60);
+        CHECK(host_native.submitted->bits == button_z && host_native.submitted->y < 0);
+        set_target(state.gestures, 0, 100);
+        host.update(1.0 / 60);
+        CHECK(host_native.submitted->bits == button_z && host_native.submitted->x < 0);
+        set_target(state.gestures, 319, 100);
+        host.update(1.0 / 60);
+        CHECK(host_native.submitted->bits == button_z && host_native.submitted->x > 0);
+        set_target(state.gestures, 160, 100);
+        host.update(1.0 / 60);
+        CHECK(host_native.submitted->bits == 0 && host_native.submitted->y == 0);
+        clear(state.gestures);
+        CHECK(enqueue(state.gestures, 220, 100, button_b, false, false, true));
+        host.update(1.0 / 60);
+        CHECK(host_native.direct_mouse && host_native.direct_mouse->x == 220 && host_native.submitted->x == 0);
+        pointer(state.gestures, "mouse", Phase::move, 180, 110, 20, false, &gi);
+        CHECK(state.gestures.hover && state.gestures.hover->x == 180);
+        CHECK(state.gestures.active && state.gestures.active->x == 220);
+        clear(state.gestures);
+        CHECK(enqueue(state.gestures, 220, 100, button_b, false, false, true));
+        set_target(state.gestures, 180, 110);
+        state.gestures.neutral_until = 30;
+        host.update(1.0 / 60);
+        CHECK(host_native.direct_mouse && host_native.direct_mouse->x == 180);
+        CHECK(state.gestures.queue.size() == 1);
+        state.gestures.pulse = Pulse{button_b, 29, 26};
+        gi.fields = 25; host.update(1.0 / 60);
+        CHECK(!host_native.direct_mouse && host_native.submitted->bits == button_b);
+        gi.fields = 26; host.update(1.0 / 60);
+        CHECK(host_native.direct_mouse && host_native.direct_mouse->x == 180);
+        CHECK(host_native.submitted->bits == button_b);
+        gi.fields = 20;
+        clear(state.gestures); state.gestures.neutral_until = 0;
+        state.gestures.drag = std::make_shared<Drag>();
+        state.gestures.drag->x = 240; state.gestures.drag->y = 120;
+        state.gestures.drag->started = true; state.gestures.drag->direct_mouse = true;
+        host.update(1.0 / 60);
+        CHECK(host_native.direct_mouse && host_native.direct_mouse->x == 240);
+        CHECK(host_native.submitted->bits == button_a && host_native.submitted->x == 0);
+        clear(state.gestures);
+        set_target(state.gestures, 250, 100);
+        host.on_input("right", pressed_event());
+        host.update(1.0 / 60);
+        CHECK(!host_native.direct_mouse && host_native.submitted->x != 0);
+        host.final();
+    }
     // Actual GUI gesture adapter uses physical screen coordinates on a HiDPI
     // window, consumes right click, and lets Continue A bypass a frozen cursor.
     shared.pad = {}; shared.gestures = {};
@@ -316,6 +392,9 @@ int main() {
         GuiScript pointer_scene(shared, native, config, store);
         pointer_scene.init();
         CHECK(!shared.pad.enabled);
+        set_target(g, 160, 0);
+        pointer_scene.on_input(nullopt, at_point(-1, 300, -1, 600));
+        CHECK(!g.hover); // leaving the image must stop edge scrolling
         { auto e = at_point(661.5, 419, 1322.5, 837.5); e.pressed = true; pointer_scene.on_input("pointer_order", e); }
         CHECK(g.queue.size() == 1 && g.queue.at(0)->buttons == 0x4000);
         NEAR(g.queue.at(0)->x, 220); NEAR(g.queue.at(0)->y, 100);

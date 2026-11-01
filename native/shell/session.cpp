@@ -7,6 +7,7 @@
 #include "../runtime/guest_poll.hpp"
 #include "../runtime/rom_image.hpp"
 #include "../runtime/minimap.hpp"
+#include "../runtime/cursor_target.hpp"
 #include <librecomp/game.hpp>
 #include <librecomp/overlays.hpp>
 #include <librecomp/rsp.hpp>
@@ -185,6 +186,29 @@ void Session::start_runtime(std::vector<std::uint8_t> rom, const std::filesystem
     };
     game.thread_create_callback = [](std::uint8_t*, recomp_context*) { runtime::initialize_guest_fpu(); };
     runtime::minimap_input().clear();
+    runtime::cursor_input().clear();
+    runtime::set_cursor_handler([](std::uint8_t* ram, void* context) {
+        auto& s = session();
+        const auto field = s.fields.load();
+        auto target = runtime::cursor_input().take({ram, 0x800000}, field);
+        if (!target || s.paused || !s.running) return;
+        recomp_func_t* setter = nullptr;
+        const auto& module = game::info();
+        for (std::size_t i = 0; i < module.num_sections; ++i) {
+            const auto& section = module.sections[i];
+            for (std::size_t j = 0; j < section.num_funcs; ++j)
+                if (section.ram_addr + section.funcs[j].offset == 0x80037fe0u)
+                    setter = section.funcs[j].func;
+        }
+        if (!setter) return;
+        auto* ctx = static_cast<recomp_context*>(context);
+        const auto saved = *ctx;
+        ctx->r4 = std::clamp<int>(int(std::lround(target->x * 2)), 0, 639);
+        ctx->r5 = std::clamp<int>(int(std::lround(target->y * 2)), 0, 479);
+        setter(ram, ctx);
+        *ctx = saved;
+        runtime::cursor_input().applied(field);
+    });
     runtime::set_minimap_handler([](std::uint8_t* ram, void* context, const runtime::MinimapTarget& target) {
         auto& s=session();
         const auto field=s.fields.load();

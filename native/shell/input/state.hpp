@@ -21,12 +21,12 @@ using Steps = std::vector<Step>;
 struct Point { double x = 0, y = 0; };
 struct Action : Point {
     unsigned buttons = 0;
-    bool hold = false, auto_pick = false, double_tap = false, tap_held = false;
+    bool hold = false, auto_pick = false, double_tap = false, tap_held = false, direct_mouse = false;
     std::optional<double> started, tap_until, context, token;
     std::optional<Steps> sequence;
 };
 struct Drag : Point {
-    bool released = false, started = false;
+    bool released = false, started = false, direct_mouse = false;
     double released_field = 0;
 };
 struct Contact {
@@ -36,7 +36,7 @@ struct Contact {
 };
 struct Hover { double x = 0, y = 0; bool touch = false; };
 struct Radial { double x = 0, y = 0; bool await_release = false; };
-struct Pulse { unsigned buttons = 0; double until_field = 0; };
+struct Pulse { unsigned buttons = 0; double until_field = 0; std::optional<double> mouse_hover_after; };
 // Two-finger and middle-button camera gestures share displacement tracking.
 struct CameraGesture {
     double origin_x = 0, origin_y = 0;
