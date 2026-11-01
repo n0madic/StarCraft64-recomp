@@ -139,7 +139,7 @@ class DesktopPatchTests(unittest.TestCase):
         source = root / 'local/source'
         files = {
             'ultramodern/src/scheduling.cpp': 'void ultramodern::check_running_queue(RDRAM_ARG1) {\n}\n',
-            'ultramodern/src/events.cpp': '    while (!exited) {\n        ultramodern::sleep_until(next);\n}\n'
+            'ultramodern/src/events.cpp': '    while (!exited) {\n        auto next = (total_vis * 1000000us) / (60 * ultramodern::get_speed_multiplier());\n        ultramodern::sleep_until(next);\n}\n'
                 'extern "C" void osViSwapBuffer(RDRAM_ARG PTR(void) frameBufPtr) {\n'
                 '    std::lock_guard lock{ events_context.message_mutex };\n}\n',
             'ultramodern/src/timer.cpp': '    while (!sc64_timers_stopping.load()) {\n        else {\n            if (sc64_timers_stopping.load()) return;\n}\n',
@@ -250,14 +250,18 @@ class DesktopPatchTests(unittest.TestCase):
             '    std::lock_guard lock{ events_context.message_mutex };\n}\n')
 
     def test_vi_late_deadline_is_signed(self):
-        source = '    while (!exited) {\n        ultramodern::sleep_until(next);\n}\n' + self.SWAP
+        source = '    while (!exited) {\n        auto next = (total_vis * 1000000us) / (60 * ultramodern::get_speed_multiplier());\n        ultramodern::sleep_until(next);\n}\n' + self.SWAP
         result = patch.transform('ultramodern/src/events.cpp', source)
+        self.assertIn('(static_cast<int64_t>(total_vis) * 1000000us)', result)
+        self.assertIn('(60 * static_cast<int64_t>(ultramodern::get_speed_multiplier()))', result)
         self.assertIn('duration_cast<std::chrono::high_resolution_clock::duration>', result)
         self.assertIn('auto delay = deadline - sc64_runtime_now();', result)
-        self.assertEqual(result.count('sc64_pause_point();'), 2)
+        self.assertIn('while (delay.count() > 0)', result)
+        self.assertIn('std::chrono::ceil<std::chrono::milliseconds>(delay)', result)
+        self.assertEqual(result.count('sc64_pause_point();'), 3)
 
     def test_vi_swap_owns_cpu_framebuffer_before_the_swap(self):
-        source = '    while (!exited) {\n        ultramodern::sleep_until(next);\n}\n' + self.SWAP
+        source = '    while (!exited) {\n        auto next = (total_vis * 1000000us) / (60 * ultramodern::get_speed_multiplier());\n        ultramodern::sleep_until(next);\n}\n' + self.SWAP
         result = patch.transform('ultramodern/src/events.cpp', source)
         self.assertLess(result.index('sc64_vi_swap(rdram, frameBufPtr);'),
                         result.index('std::lock_guard lock{ events_context.message_mutex };'))

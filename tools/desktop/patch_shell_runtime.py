@@ -98,11 +98,21 @@ def transform(name: str, text: str) -> str:
                     'void ultramodern::check_running_queue(RDRAM_ARG1) {\n    sc64_pause_point();')
     if name.endswith("events.cpp"):
         text = once(text, '    while (!exited) {', '    while (!exited) {\n        sc64_pause_point();\n        if (exited) break;')
+        # total_vis is unsigned. Without a signed duration, an overdue `next`
+        # wraps in the upstream clock-jump check, which then skips every wait.
+        text = once(text, '(total_vis * 1000000us) / (60 * ultramodern::get_speed_multiplier())',
+                    '(static_cast<int64_t>(total_vis) * 1000000us) / '
+                    '(60 * static_cast<int64_t>(ultramodern::get_speed_multiplier()))')
         text = once(text, '        ultramodern::sleep_until(next);',
                     '        auto deadline = std::chrono::high_resolution_clock::time_point(\n'
                     '            std::chrono::duration_cast<std::chrono::high_resolution_clock::duration>(next.time_since_epoch()));\n'
                     '        auto delay = deadline - sc64_runtime_now();\n'
-                    '        if (delay.count() > 0) std::this_thread::sleep_for(delay);\n'
+                    '        while (delay.count() > 0) {\n'
+                    '            std::this_thread::sleep_for(std::chrono::ceil<std::chrono::milliseconds>(delay));\n'
+                    '            sc64_pause_point();\n'
+                    '            if (exited) break;\n'
+                    '            delay = deadline - sc64_runtime_now();\n'
+                    '        }\n'
                     '        sc64_pause_point();\n        if (exited) break;')
         # Own CPU-written framebuffer bytes when the guest declares them complete.
         text = once(text, 'extern "C" void osViSwapBuffer(RDRAM_ARG PTR(void) frameBufPtr) {\n'
