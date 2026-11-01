@@ -141,7 +141,15 @@ class Component:
 
 def runtime_components(target: str | None) -> list[Component]:
     """C runtime pieces linked statically into the binaries of one package target (none for macOS)."""
+    # MSYS2 native Windows Python does not interpret /ucrt64 as the MSYS root.
+    # Derive the prefix from the compiler actually selected on PATH instead.
+    compiler = (shutil.which('x86_64-w64-mingw32-gcc') or shutil.which('gcc')) \
+        if target == 'windows' and sys.platform == 'win32' else None
+    prefix = Path(compiler).resolve().parent.parent if compiler else None
+    msys_gcc = local_file(str(prefix / 'share/licenses/gcc/COPYING.RUNTIME')) if prefix else lambda: None
+    msys_crt = local_file(str(prefix / 'share/licenses/crt/COPYING')) if prefix else lambda: None
     gcc_runtime = first_of('the GCC Runtime Library Exception',
+                           msys_gcc,
                            local_file('/opt/homebrew/Cellar/gcc/*/COPYING.RUNTIME'),
                            local_file('/usr/local/Cellar/gcc/*/COPYING.RUNTIME'),
                            local_file('/usr/share/doc/gcc-*-base/copyright'),
@@ -163,6 +171,7 @@ def runtime_components(target: str | None) -> list[Component]:
         return [
             Component('mingw-w64 runtime (CRT, winpthreads)', 'ZPL-2.1, MIT and others', 'every Windows executable',
                       'mingw-w64.txt', first_of('the mingw-w64 license summary',
+                                                 msys_crt,
                                                 local_file('/opt/homebrew/Cellar/mingw-w64/*/COPYING'),
                                                 local_file('/usr/local/Cellar/mingw-w64/*/COPYING'),
                                                 local_file('/usr/share/doc/mingw-w64-x86-64-dev/copyright'),
