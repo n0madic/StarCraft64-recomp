@@ -110,6 +110,7 @@ public:
     virtual void pause(bool paused) = 0;
     virtual void set_pad(int player, unsigned buttons, double x, double y) = 0;
     virtual bool navigate_minimap(double x, double y, double context, double field) = 0;
+    virtual bool position_mouse_cursor(std::optional<input::Point>, double) { return false; }
     virtual void set_cursor_hidden(const std::optional<std::array<double, 4>>& region) = 0;
     virtual void vibrate(int milliseconds, int amplitude) = 0;
     virtual void set_haptics(bool enabled) = 0;

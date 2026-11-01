@@ -158,6 +158,8 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char* argv[]) {
         }
 #endif
         app->config.parse_arguments(argc, argv);
+        const bool low_latency_present = app->config.number("sc64.low_latency_present", 0) == 1;
+        if (low_latency_present) SDL_SetHint(SDL_HINT_MAIN_CALLBACK_RATE, "240");
         if (const auto name = app->config.string("sc64.log_level"); !name.empty()) {
             log::Level level = log::Level::info;
             if (log::parse_level(name, level)) log::set_level(level);
@@ -181,7 +183,8 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char* argv[]) {
         if (!app->window) { log::error("Window creation: %s", SDL_GetError()); return SDL_APP_FAILURE; }
         sc64_platform_attach_window(app->window);
         app->video.create(app->window, app->config.string("sc64.render_driver"),
-                          resource_path("DejaVuSansMono-Bold.ttf"), resource_path("launcher-icon.png"));
+                          resource_path("DejaVuSansMono-Bold.ttf"), resource_path("launcher-icon.png"),
+                          !low_latency_present);
         auto* raw = app.get();
         app->native = std::make_unique<Native>(app->config, Native::Window{
             [raw] { return raw->pixels(); },
@@ -288,7 +291,10 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
             app.dispatch(motion);
             break;
         }
-        case SDL_EVENT_WINDOW_MOUSE_LEAVE: app.shared.pointer.reset(); break;
+        case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+            app.shared.pointer.reset();
+            if (app.shared.gestures.hover && !app.shared.gestures.hover->touch) app.shared.gestures.hover.reset();
+            break;
         case SDL_EVENT_FINGER_DOWN:
         case SDL_EVENT_FINGER_MOTION:
         case SDL_EVENT_FINGER_UP:

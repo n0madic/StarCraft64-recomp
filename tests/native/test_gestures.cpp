@@ -175,6 +175,7 @@ int main() {
             const auto r = read(hs, hf, false);
             assert(r.buttons == 0 && !hs.drive && !hs.active);
             const auto [dx, dy] = motion(r.x, r.y, divisor);
+            if (f == 1) assert(std::hypot(dx, dy) > 8.3 && "mouse hover must exceed the old 8 px/field limit");
             assert(std::sqrt(dx * dx + dy * dy) <= servo.hover_step_cap + .3 && "hover must not skip large areas");
             idle = (std::abs(tx - cx) + std::abs(ty - cy) > 20 && r.x == 0 && r.y == 0) ? idle + 1 : 0;
             assert(idle < 4 && "hover must not have an eight-field settle gap");

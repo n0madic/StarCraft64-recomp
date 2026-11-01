@@ -131,19 +131,20 @@ bool set_target(GestureState& s, double x, double y, bool touch) {
     return true;
 }
 
-bool enqueue(GestureState& s, double x, double y, unsigned buttons, bool hold, bool auto_pick) {
+bool enqueue(GestureState& s, double x, double y, unsigned buttons, bool hold, bool auto_pick, bool direct_mouse) {
     if (s.queue.size() >= 8 || !set_target(s, x, y)) {
         s.notice = "Input queue full or point outside image"; return false;
     }
     auto action = std::make_shared<Action>();
     action->x = x; action->y = y; action->buttons = buttons; action->hold = hold; action->auto_pick = auto_pick;
+    action->direct_mouse = direct_mouse;
     s.queue.push_back(std::move(action));
     return true;
 }
 
 void button(GestureState& s, unsigned buttons, double field) {
     clear(s);
-    s.pulse = Pulse{buttons, field + 8};
+    s.pulse = Pulse{buttons, field + 8, std::nullopt};
 }
 
 // Each step lasts its field count from its first submission, so a late poll
@@ -227,7 +228,7 @@ bool pointer(GestureState& s, const ContactId& id, Phase phase, double x, double
     }
     const auto found = s.contacts.find(id);
     if (found == s.contacts.end()) {
-        if (phase == Phase::move && !is_touch && !s.active && !s.drag && layout) set_target(s, x, y);
+        if (phase == Phase::move && !is_touch && !s.drag && layout) set_target(s, x, y);
         return false;
     }
     const auto p = found->second;
@@ -250,7 +251,8 @@ bool pointer(GestureState& s, const ContactId& id, Phase phase, double x, double
         if (!s.drag) {
             s.drag = std::make_shared<Drag>();
             s.drag->x = x; s.drag->y = y;
-            enqueue(s, p->x, p->y, button_a, true);
+            s.drag->direct_mouse = !p->touch;
+            enqueue(s, p->x, p->y, button_a, true, false, !p->touch);
             s.hover.reset();
         }
         s.drag->x = x; s.drag->y = y;
@@ -269,7 +271,7 @@ bool pointer(GestureState& s, const ContactId& id, Phase phase, double x, double
         } else if (s.drag) {
             s.drag->released = true; s.drag->released_field = field;
         } else if (!map_taps::release(s, *p, x, y, info)) {
-            if (enqueue(s, x, y, button_a, false, true)) map_taps::defer(s, s.queue.back(), field, info);
+            if (enqueue(s, x, y, button_a, false, true, !p->touch)) map_taps::defer(s, s.queue.back(), field, info);
         }
     }
     return true;
@@ -436,7 +438,14 @@ PadOutput read(GestureState& s, const Info& info, bool blocked) {
                 return {s.seq->steps.front().first};
             }
             if (action->hold && s.drag) { s.drag->started = true; s.target = s.drag; return {button_a}; }
-            if (action->buttons != 0) { s.pulse = Pulse{action->buttons, field + 8}; return {action->buttons}; }
+            if (action->buttons != 0) {
+                // Keep an order's target stable for the existing six-field
+                // minimum before letting mouse hover resume during its tail.
+                const auto hover_after = action->direct_mouse && action->buttons == button_b
+                    ? std::optional<double>(field + 6) : std::nullopt;
+                s.pulse = Pulse{action->buttons, field + 8, hover_after};
+                return {action->buttons};
+            }
         }
         return {held};
     }

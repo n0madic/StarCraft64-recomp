@@ -1,4 +1,5 @@
 #include "native.hpp"
+#include "../runtime/cursor_target.hpp"
 #include "game_module.hpp"
 #include "audio.hpp"
 #include "log.hpp"
@@ -88,6 +89,7 @@ void Native::apply_pause() {
     if (!pause_policy_.input_active()) {
         for (auto& pad : s.pads) { pad.buttons = 0; pad.x = 0; pad.y = 0; }
         runtime::minimap_input().clear();
+        runtime::cursor_input().clear();
     }
     if (user_paused_ || inactive_ || iconified_) { cursor_requested_ = false; restore_cursor(); }
 }
@@ -542,6 +544,26 @@ bool Native::navigate_minimap(double x, double y, double context, double source_
         && ui_.mode == "game" && pause_policy_.input_active() && s.running && !s.paused;
     if (valid) runtime::minimap_input().submit({x, y, std::uint32_t(context), std::uint64_t(source_field)});
     return valid;
+}
+
+bool Native::position_mouse_cursor(std::optional<input::Point> point, double source_field) {
+    auto& s = session();
+    const auto field = s.fields.load();
+    if (!point || !std::isfinite(source_field) || source_field < 0 || source_field > double(field)
+        || double(field) - source_field > 12 || !std::isfinite(point->x) || !std::isfinite(point->y)
+        || point->x < 0 || point->x >= 320 || point->y < 0 || point->y >= 240
+        || !cursor_.valid || !scanout_visible_ || width_ != 320 || height_ != 240
+        || ui_.mode != "game" || !pause_policy_.input_active() || !s.running || s.paused) {
+        runtime::cursor_input().clear();
+        if (direct_cursor_active_) log::debug("SC64 direct mouse cursor inactive");
+        direct_cursor_active_ = false;
+        return false;
+    }
+    runtime::cursor_input().submit({point->x, point->y, std::uint64_t(source_field)});
+    const bool active = runtime::cursor_input().recently_applied(field);
+    if (active != direct_cursor_active_) log::debug("SC64 direct mouse cursor %s", active ? "active" : "inactive");
+    direct_cursor_active_ = active;
+    return active;
 }
 
 void Native::set_cursor_hidden(const std::optional<std::array<double, 4>>& region) {

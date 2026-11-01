@@ -2,10 +2,12 @@
 // the Esc/Android Back mapping.
 #include "devices.hpp"
 #include "gestures.hpp"
+#include "../../native/runtime/cursor_target.hpp"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 namespace {
 [[noreturn]] void fail(const char* file, int line, const char* expr) {
@@ -34,6 +36,27 @@ Info mode(const char* ui_mode, double ui_field) {
 }
 
 int main() {
+    {
+        using namespace sc64::runtime;
+        std::vector<std::uint8_t> ram(0x800000);
+        const auto put_byte = [&](unsigned a, unsigned v) { ram[a ^ 3] = std::uint8_t(v); };
+        const auto put_word = [&](unsigned a, std::uint32_t v) {
+            for (int i = 0; i < 4; ++i) put_byte(a + i, v >> (24 - i * 8));
+        };
+        put_word(0x37fe0, 0x00042400); put_word(0x37fe4, 0x00042403);
+        put_word(0x1ae94, 0x27bdffd8);
+        put_byte(guest::physical(guest::game_mode) + 1, 3);
+        CursorInbox inbox;
+        inbox.submit({100, 100, 10}); CHECK(inbox.take(ram, 11).has_value());
+        inbox.submit({100, 100, 10}); CHECK(!inbox.take(ram, 23));
+        inbox.submit({320, 100, 10}); CHECK(!inbox.take(ram, 10));
+        put_byte(guest::physical(guest::split_screen), 1);
+        inbox.submit({100, 100, 10}); CHECK(!inbox.take(ram, 10));
+        put_byte(guest::physical(guest::split_screen), 0);
+        put_word(0x37fe0, 0);
+        inbox.submit({100, 100, 10}); CHECK(!inbox.take(ram, 10));
+        inbox.applied(10); CHECK(inbox.recently_applied(22)); CHECK(!inbox.recently_applied(23));
+    }
     pads::State state;
     in(state, "a", {.pressed = true, .value = 1}, 10);
     in(state, "a", {.released = true, .value = 0}, 10);

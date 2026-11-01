@@ -17,15 +17,16 @@ struct Feedback { UiItem item; double alpha = 0; };
 inline constexpr std::string_view layout_notice =
     "Map gestures need the one-player screen; long-press for controller commands";
 struct ServoTuning {
-    double hover_step_cap = 8, action_step_cap = 16;
-    double hover_horizon = 3, action_horizon = 1;
-    double hover_age_gain = 1, action_age_gain = 1.5;
+    double hover_step_cap = 16, action_step_cap = 16;
+    double hover_horizon = 1, action_horizon = 1;
+    double hover_age_gain = 1.5, action_age_gain = 1.5;
     double arrival_margin = 2;
 };
-extern ServoTuning servo; // ADR-066 constants; mutable for focused fixtures.
+extern ServoTuning servo; // ADR-066/094 constants; mutable for focused fixtures.
 void clear(GestureState& s);
 bool set_target(GestureState& s, double x, double y, bool touch = false);
-bool enqueue(GestureState& s, double x, double y, unsigned buttons = 0, bool hold = false, bool auto_pick = false);
+bool enqueue(GestureState& s, double x, double y, unsigned buttons = 0, bool hold = false, bool auto_pick = false,
+             bool direct_mouse = false);
 void button(GestureState& s, unsigned buttons, double field);
 void sequence(GestureState& s, Steps steps, double field);
 bool ui_pointer(GestureState& s, const ContactId& id, Phase phase, double x, double y, const Info& info,

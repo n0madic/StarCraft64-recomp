@@ -34,7 +34,8 @@ class Video {
 public:
     ~Video();
     // `icon` is a PNG for the start screen; without it (or if it cannot be read) the screen has no icon.
-    void create(SDL_Window* window, const std::string& driver, const std::string& font, const std::string& icon = {});
+    void create(SDL_Window* window, const std::string& driver, const std::string& font, const std::string& icon = {},
+                bool vsync = true);
     bool has_icon() const { return icon_ != nullptr; }
     void destroy();
     // Recreates device objects after SDL_EVENT_RENDER_DEVICE_RESET.

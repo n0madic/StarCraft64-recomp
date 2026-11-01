@@ -64,6 +64,7 @@ public:
     void pause(bool paused) override;
     void set_pad(int player, unsigned buttons, double x, double y) override;
     bool navigate_minimap(double x, double y, double context, double field) override;
+    bool position_mouse_cursor(std::optional<input::Point> point, double field) override;
     void set_cursor_hidden(const std::optional<std::array<double, 4>>& region) override;
     void vibrate(int milliseconds, int amplitude) override;
     void set_haptics(bool enabled) override;
@@ -96,7 +97,7 @@ private:
     desktop::RumbleMotor rumble_motor_;
     desktop::PausePolicy pause_policy_;
     bool background_input_probe_ = false;
-    bool cursor_requested_ = false, system_cursor_hidden_ = false;
+    bool cursor_requested_ = false, system_cursor_hidden_ = false, direct_cursor_active_ = false;
     Sc64CursorRegion cursor_region_;
     desktop::CursorFeedback cursor_;
     desktop::UiFeedback ui_;
