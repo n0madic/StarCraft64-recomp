@@ -33,6 +33,15 @@ class Workspace(unittest.TestCase):
         self.icons.mkdir()
         for name in ('StarCraft64.icns', 'StarCraft64.png', 'StarCraft64.ico', 'StarCraft64.rc'):
             (self.icons / name).write_bytes(f'icon {name}'.encode())
+        font = self.directory / 'font.ttf'
+        font.write_bytes(b'synthetic font')
+        runtime = self.directory / 'runtime'
+        header = runtime / 'N64Recomp/include/recomp.h'
+        header.parent.mkdir(parents=True)
+        header.write_bytes(b'/* synthetic runtime header */\n')
+        for patcher in (mock.patch.object(package.bootstrap, 'FONT', font), mock.patch.object(package, 'RUNTIME', runtime)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def staged(self, target):
         expected = package.layout(target, self.binaries, self.notice_files, self.icons)
@@ -144,10 +153,16 @@ class AuditTests(Workspace):
 
     def test_symbolic_links_are_rejected(self):
         stage, expected = self.staged('linux')
-        (stage / 'link').symlink_to(stage / 'README.txt')
+        try:
+            (stage / 'link').symlink_to(stage / 'README.txt')
+        except OSError as error:
+            if sys.platform == 'win32' and error.winerror == 1314:
+                self.skipTest('Windows symbolic link privilege is unavailable')
+            raise
         with self.assertRaisesRegex(SystemExit, 'Symbolic link'):
             package.audit(stage, expected)
 
+    @unittest.skipIf(sys.platform == 'win32', 'Windows does not expose POSIX executable mode bits')
     def test_modes_make_only_the_programs_executable(self):
         stage, _ = self.staged('linux')
         for name in ('StarCraft64', 'sc64_setup', 'N64Recomp'):
@@ -252,6 +267,23 @@ class RecompilerGateTests(Workspace):
 
 
 class NoticeTests(unittest.TestCase):
+    def test_windows_uses_selected_msys_compiler_license_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory) / 'ucrt64'
+            gcc = prefix / 'bin/gcc.exe'
+            gcc.parent.mkdir(parents=True)
+            gcc.touch()
+            crt = prefix / 'share/licenses/crt/COPYING'
+            runtime = prefix / 'share/licenses/gcc/COPYING.RUNTIME'
+            for path, text in ((crt, 'CRT license'), (runtime, 'GCC exception')):
+                path.parent.mkdir(parents=True)
+                path.write_text(text)
+            with mock.patch.object(notices.sys, 'platform', 'win32'), mock.patch.object(notices.shutil, 'which', return_value=str(gcc)) as which:
+                components = notices.runtime_components('windows')
+            which.assert_called_once_with('x86_64-w64-mingw32-gcc')
+            self.assertEqual(components[0].text(), 'CRT license\n')
+            self.assertEqual(components[1].text(), 'GCC exception\n')
+
     def test_extractors_keep_only_the_license(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -344,8 +376,8 @@ class NeutralIconTests(unittest.TestCase):
             top, bottom = art.getpixel((512, 40)), art.getpixel((512, 990))
             self.assertTrue(all(abs(a - b) < 12 for a, b in zip(top, neutral_icon.BACKGROUND)), top)
             self.assertGreater(sum(bottom), sum(top))  # the gradient brightens downward
-            icon = Image.open(Path(directory) / 'a/StarCraft64.ico')
-            self.assertIn((256, 256), icon.info['sizes'])
+            with Image.open(Path(directory) / 'a/StarCraft64.ico') as icon:
+                self.assertIn((256, 256), icon.info['sizes'])
             self.assertEqual((Path(directory) / 'a/StarCraft64.rc').read_text(), '1 ICON "StarCraft64.ico"\n')
 
     def test_the_label_is_the_requested_one(self):
