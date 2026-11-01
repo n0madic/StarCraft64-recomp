@@ -76,6 +76,18 @@ x86_64 machine). `python tools/sc64.py doctor` checks all of this and prints the
 install command for what is missing. These commands do not upload generated game
 code.
 
+On Windows, recipe TOML hashes require LF bytes. New Git checkouts enforce this
+through `.gitattributes`; an existing checkout with CRLF recipe files must be
+refreshed after preserving any local edits. The separately obtained pinned
+`third_party/N64ModernRuntime` checkout is also checked against exact upstream
+bytes: create that checkout with `git -c core.autocrlf=false clone ...` (and
+use LF for any nested checkouts). Do not change an existing checkout with local
+work without preserving it first. UCRT64 license discovery is supported when
+its GCC is on PATH, but this alone does not establish UCRT64 as a verified build
+host; the documented native Windows profile remains MINGW64 (D-057).
+On Windows, prefer a short checkout path: deeply nested build directories can
+exceed the path limits of the compiler or archiver.
+
 ```sh
 make bootstrap        # SDL3, stb_truetype, DejaVu fonts, miniaudio (pinned, hashed)
 make build            # the package for the OS you run on: StarCraft64.app / -linux / -windows
