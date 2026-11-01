@@ -171,7 +171,7 @@ def export(analysis: Path, generated: Path, recipe: Path = RECIPE) -> Path:
     staging = Path(tempfile.mkdtemp(prefix=".recipe-", dir=recipe.parent if recipe.parent.exists() else None))
     try:
         for name, text in texts.items():
-            (staging / name).write_text(text)
+            (staging / name).write_bytes(text.encode('utf-8'))
         check(staging)
         recipe.mkdir(parents=True, exist_ok=True)
         for name in texts:
