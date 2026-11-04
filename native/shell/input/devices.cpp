@@ -238,7 +238,12 @@ std::optional<Point> to_native_raw(const std::optional<Rect>& rect, double x, do
 std::optional<Point> to_native(const std::optional<Rect>& rect, double x, double y) {
     if (!rect || x < rect->x || y < rect->y || x >= rect->x + rect->width || y >= rect->y + rect->height)
         return std::nullopt;
-    return to_native_raw(rect, x, y);
+    auto point = to_native_raw(rect, x, y);
+    // Pixel-centre inversion can put an in-viewport edge pixel slightly
+    // outside the image at scaled sizes. Keep real edge input reachable.
+    point->x = std::clamp(point->x, 0.0, std::nextafter(rect->nw, 0.0));
+    point->y = std::clamp(point->y, 0.0, std::nextafter(rect->nh, 0.0));
+    return point;
 }
 }
 
