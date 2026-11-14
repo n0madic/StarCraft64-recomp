@@ -550,18 +550,18 @@ bool Native::navigate_minimap(double x, double y, double context, double source_
     return valid;
 }
 
-bool Native::position_mouse_cursor(std::optional<input::Point> point, double source_field) {
+bool Native::position_cursor(std::optional<input::Point> point, double source_field) {
     if (!point || !std::isfinite(point->x) || !std::isfinite(point->y)
         || point->x < 0 || point->x >= 320 || point->y < 0 || point->y >= 240 || !cursor_.valid
         || !accepts_mission_request(source_field, runtime::cursor_request_max_age)) {
         runtime::cursor_input().clear();
-        if (direct_cursor_active_) log::debug("SC64 direct mouse cursor inactive");
+        if (direct_cursor_active_) log::debug("SC64 direct cursor inactive");
         direct_cursor_active_ = false;
         return false;
     }
     runtime::cursor_input().submit({point->x, point->y, std::uint64_t(source_field)});
     const bool active = runtime::cursor_input().recently_applied(session().fields.load());
-    if (active != direct_cursor_active_) log::debug("SC64 direct mouse cursor %s", active ? "active" : "inactive");
+    if (active != direct_cursor_active_) log::debug("SC64 direct cursor %s", active ? "active" : "inactive");
     direct_cursor_active_ = active;
     return active;
 }

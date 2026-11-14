@@ -230,6 +230,7 @@ void HostScript::window_event(WindowEvent event) {
 void HostScript::init() {
     native_.set_haptics(config_.number("sc64.haptics", 1) == 1);
     direct_mouse_ = config_.number("sc64.direct_mouse", 1) == 1;
+    direct_touch_ = config_.number("sc64.direct_touch", 1) == 1;
     elapsed = 0; next_log_ = 0; paused = false;
     shared_.user_paused = false;
     recipe.clear();
@@ -407,7 +408,8 @@ void HostScript::update(double dt) {
                 const double x = p[2].get<double>(), y = p[3].get<double>();
                 if (!ui_pointer(g, id, phase, x, y, info, item.right, item.touch)) {
                     if (item.right) {
-                        if (phase == Phase::down) enqueue(g, x, y, button_b, false, false, !item.touch);
+                        if (phase == Phase::down)
+                            enqueue(g, x, y, button_b, false, false, item.touch ? Origin::touch : Origin::mouse);
                     } else input::pointer(g, id, phase, x, y, info.fields, item.touch, &info);
                 }
                 native_.log("SC64 pointer " + nlohmann::json{{"field", number(info.fields)}, {"id", p[0]},
@@ -483,31 +485,32 @@ void HostScript::update(double dt) {
         }
         if (player == 1) {
             std::optional<Point> mouse;
-            const bool eligible = direct_mouse_ && !input_blocked && !source.controller && !source.touch && !source.recipe
+            const bool eligible = !input_blocked && !source.controller && !source.touch && !source.recipe
                 && !g.ui && !g.pan && !g.two && !g.radial && !g.seq;
             const bool dragging = g.drag && g.drag->started;
             bool hover = false;
             if (eligible && !g.pulse && info.fields >= g.neutral_until && g.target
-                && ((g.active && g.active->direct_mouse) || (dragging && g.drag->direct_mouse))) {
+                && ((g.active && direct(g.active->origin)) || (dragging && direct(g.drag->origin)))) {
                 // A selection drag at an edge returns to stick steering, which
                 // pushes the held-A cursor against the edge (ADR-098).
                 if (!dragging || edge_direction(g.target->x, g.target->y) == std::pair{0, 0})
                     mouse = Point{g.target->x, g.target->y};
-            } else if (eligible && g.hover && !g.hover->touch && !g.active && !g.drag
-                     && std::all_of(g.queue.begin(), g.queue.end(), [](const auto& action) { return action->direct_mouse; })
-                     && g.contacts.empty() && (!g.pulse || (g.pulse->mouse_hover_after
-                        && info.fields >= *g.pulse->mouse_hover_after))) {
+            } else if (eligible && g.hover && direct(g.hover->origin) && !g.active && !g.drag
+                     && std::all_of(g.queue.begin(), g.queue.end(), [&](const auto& action) { return direct(action->origin); })
+                     // A resting finger shows the cursor under it before the tap or drag (ADR-099).
+                     && (g.contacts.empty() || g.hover->origin == Origin::touch)
+                     && (!g.pulse || (g.pulse->mouse_hover_after && info.fields >= *g.pulse->mouse_hover_after))) {
                 mouse = Point{g.hover->x, g.hover->y};
                 hover = true;
             }
-            if (native_.position_mouse_cursor(mouse, info.fields) && mouse) {
+            if (native_.position_cursor(mouse, info.fields) && mouse) {
                 source.direct = true;
                 out.x = 0; out.y = 0;
                 g.follow.reset();
                 if (g.drag) g.drag->direct_cursor = true;
                 // Original Z+stick pans without moving the guest cursor. Keep
                 // the direct pointer at the viewport edge while scrolling.
-                if (hover && !g.pulse && info.fields >= g.neutral_until && out.buttons == 0) {
+                if (hover && g.hover->mouse() && !g.pulse && info.fields >= g.neutral_until && out.buttons == 0) {
                     const auto [ex, ey] = edge_direction(mouse->x, mouse->y);
                     out.x = ex * .5; out.y = -ey * .5;
                     if (ex != 0 || ey != 0) out.buttons |= button_z;
@@ -890,7 +893,7 @@ bool GuiScript::contact(const std::optional<std::string>& id, const std::string&
         native = viewport::to_native_clamped(rect, px, py);
     if (!native) {
         g.hud_mouse.reset();
-        if (!is_touch && g.hover && !g.hover->touch) g.hover.reset();
+        if (!is_touch && g.hover && g.hover->mouse()) g.hover.reset();
         if (a.released || g.contacts.contains(key) || g.pan || g.ui || g.minimap) input::clear(g);
         return false;
     }
@@ -899,7 +902,7 @@ bool GuiScript::contact(const std::optional<std::string>& id, const std::string&
         if (ui_pointer(g, key, phase, x, y, info, id == "pointer_order", is_touch)) return true;
     }
     if (id == "pointer_order") {
-        if (a.pressed) enqueue(g, x, y, button_b, false, false, true);
+        if (a.pressed) enqueue(g, x, y, button_b, false, false, Origin::mouse);
         return true;
     }
     if (pan_event) { pan_pointer(g, phase, x, y); return true; }

@@ -125,9 +125,9 @@ void clear(GestureState& s) {
     s.seq.reset();
 }
 
-bool set_target(GestureState& s, double x, double y, bool touch) {
+bool set_target(GestureState& s, double x, double y, Origin origin) {
     if (!in_image(x, y)) return false;
-    s.hover = Hover{x, y, touch};
+    s.hover = Hover{x, y, origin};
     return true;
 }
 
@@ -136,15 +136,15 @@ std::pair<int, int> edge_direction(double x, double y) {
     return {x < band ? -1 : x >= 320 - band ? 1 : 0, y < band ? -1 : y >= 240 - band ? 1 : 0};
 }
 
-bool enqueue(GestureState& s, double x, double y, unsigned buttons, bool hold, bool auto_pick, bool direct_mouse) {
+bool enqueue(GestureState& s, double x, double y, unsigned buttons, bool hold, bool auto_pick, Origin origin) {
     // The hover left at the action's point keeps its origin: only a mouse
-    // action leaves mouse hover that the direct cursor may take over.
-    if (s.queue.size() >= 8 || !set_target(s, x, y, !direct_mouse)) {
+    // action leaves mouse hover that may edge-scroll (ADR-098).
+    if (s.queue.size() >= 8 || !set_target(s, x, y, origin)) {
         s.notice = "Input queue full or point outside image"; return false;
     }
     auto action = std::make_shared<Action>();
     action->x = x; action->y = y; action->buttons = buttons; action->hold = hold; action->auto_pick = auto_pick;
-    action->direct_mouse = direct_mouse;
+    action->origin = origin;
     s.queue.push_back(std::move(action));
     return true;
 }
@@ -200,7 +200,7 @@ bool pointer(GestureState& s, const ContactId& id, Phase phase, double x, double
         return true;
     }
     if (phase == Phase::down) {
-        if (!set_target(s, x, y, is_touch)) return false;
+        if (!set_target(s, x, y, is_touch ? Origin::touch : Origin::mouse)) return false;
         if (s.contacts.contains(id)) return true;
         const std::size_t count = s.contacts.size();
         const auto first = count ? s.contacts.begin()->second : nullptr;
@@ -258,8 +258,8 @@ bool pointer(GestureState& s, const ContactId& id, Phase phase, double x, double
         if (!s.drag) {
             s.drag = std::make_shared<Drag>();
             s.drag->x = x; s.drag->y = y;
-            s.drag->direct_mouse = !p->touch;
-            enqueue(s, p->x, p->y, button_a, true, false, !p->touch);
+            s.drag->origin = p->touch ? Origin::touch : Origin::mouse;
+            enqueue(s, p->x, p->y, button_a, true, false, s.drag->origin);
             s.hover.reset();
         }
         s.drag->x = x; s.drag->y = y;
@@ -271,14 +271,14 @@ bool pointer(GestureState& s, const ContactId& id, Phase phase, double x, double
             if (s.contacts.empty()) {
                 const auto two = *s.two;
                 s.two.reset();
-                if (!two.moved && !two.suppress_tap && field - two.field < 36) enqueue(s, two.x, two.y, button_b);
+                if (!two.moved && !two.suppress_tap && field - two.field < 36) enqueue(s, two.x, two.y, button_b, false, false, Origin::touch);
             }
         } else if (s.radial) {
             // The GUI resolves the selected radial item before releasing.
         } else if (s.drag) {
             s.drag->released = true; s.drag->released_field = field;
         } else if (!map_taps::release(s, *p, x, y, info)) {
-            if (enqueue(s, x, y, button_a, false, true, !p->touch)) map_taps::defer(s, s.queue.back(), field, info);
+            if (enqueue(s, x, y, button_a, false, true, p->touch ? Origin::touch : Origin::mouse)) map_taps::defer(s, s.queue.back(), field, info);
         }
     }
     return true;
@@ -390,7 +390,7 @@ PadOutput read(GestureState& s, const Info& info, bool blocked) {
     }
     if (!s.active && !s.drag && s.hover) {
         s.drive.reset(); s.settle_until = 0;
-        const bool touch = s.hover->touch;
+        const bool touch = !s.hover->mouse();
         const auto [x, y] = follow_mouse(s, info, Point{s.hover->x, s.hover->y},
             touch ? servo.action_step_cap : servo.hover_step_cap,
             touch ? servo.action_horizon : servo.hover_horizon,
@@ -456,7 +456,7 @@ PadOutput read(GestureState& s, const Info& info, bool blocked) {
             if (action->buttons != 0) {
                 // Keep an order's target stable for the existing six-field
                 // minimum before letting mouse hover resume during its tail.
-                const auto hover_after = action->direct_mouse && action->buttons == button_b
+                const auto hover_after = action->origin == Origin::mouse && action->buttons == button_b
                     ? std::optional<double>(field + 6) : std::nullopt;
                 s.pulse = Pulse{action->buttons, field + 8, hover_after};
                 return {action->buttons};

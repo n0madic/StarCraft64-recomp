@@ -19,17 +19,22 @@ using Steps = std::vector<Step>;
 // Actions and drags are shared as cursor targets through shared_ptr<Point>;
 // the control block keeps the derived deleter, so no virtual destructor.
 struct Point { double x = 0, y = 0; };
+// Who placed a cursor target. Mouse and touch targets may use the direct guest
+// cursor setter (ADR-098/099); other targets (recipes, UI fallbacks) never do.
+enum class Origin : unsigned char { other, mouse, touch };
 struct Action : Point {
     unsigned buttons = 0;
-    bool hold = false, auto_pick = false, double_tap = false, tap_held = false, direct_mouse = false;
+    bool hold = false, auto_pick = false, double_tap = false, tap_held = false;
+    Origin origin = Origin::other;
     std::optional<double> started, tap_until, context, token;
     std::optional<Steps> sequence;
 };
 struct Drag : Point {
-    bool released = false, started = false, direct_mouse = false;
-    // Set by the host once the guest setter has positioned this mouse drag's
-    // cursor: on release it ends where the cursor is rather than on reaching
-    // its exact target (ADR-098). Never set while the setter is unavailable.
+    bool released = false, started = false;
+    Origin origin = Origin::other;
+    // Set by the host once the guest setter has positioned this drag's cursor:
+    // on release it ends where the cursor is rather than on reaching its exact
+    // target (ADR-098). Never set while the setter is unavailable.
     bool direct_cursor = false;
     double released_field = 0;
 };
@@ -38,7 +43,11 @@ struct Contact {
     bool touch = false, fallback = false;
     std::shared_ptr<Action> order_tap;
 };
-struct Hover { double x = 0, y = 0; bool touch = false; };
+struct Hover {
+    double x = 0, y = 0;
+    Origin origin = Origin::mouse;
+    bool mouse() const { return origin == Origin::mouse; }
+};
 struct Radial { double x = 0, y = 0; bool await_release = false; };
 struct Pulse { unsigned buttons = 0; double until_field = 0; std::optional<double> mouse_hover_after; };
 // Two-finger and middle-button camera gestures share displacement tracking.

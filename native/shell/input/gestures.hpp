@@ -27,12 +27,12 @@ struct ServoTuning {
 };
 extern ServoTuning servo; // ADR-066/094 constants; mutable for focused fixtures.
 void clear(GestureState& s);
-bool set_target(GestureState& s, double x, double y, bool touch = false);
+bool set_target(GestureState& s, double x, double y, Origin origin = Origin::mouse);
 // Edge-scroll direction (-1, 0, 1 per axis, image Y down) for a native point in
 // the two-pixel band at each image edge (ADR-097).
 std::pair<int, int> edge_direction(double x, double y);
 bool enqueue(GestureState& s, double x, double y, unsigned buttons = 0, bool hold = false, bool auto_pick = false,
-             bool direct_mouse = false);
+             Origin origin = Origin::other);
 void button(GestureState& s, unsigned buttons, double field);
 void sequence(GestureState& s, Steps steps, double field);
 bool ui_pointer(GestureState& s, const ContactId& id, Phase phase, double x, double y, const Info& info,

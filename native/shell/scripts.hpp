@@ -110,7 +110,7 @@ public:
     virtual void pause(bool paused) = 0;
     virtual void set_pad(int player, unsigned buttons, double x, double y) = 0;
     virtual bool navigate_minimap(double x, double y, double context, double field) = 0;
-    virtual bool position_mouse_cursor(std::optional<input::Point>, double) { return false; }
+    virtual bool position_cursor(std::optional<input::Point>, double) { return false; }
     virtual void set_cursor_hidden(const std::optional<std::array<double, 4>>& region) = 0;
     virtual void vibrate(int milliseconds, int amplitude) = 0;
     virtual void set_haptics(bool enabled) = 0;
@@ -207,8 +207,12 @@ private:
     double next_log_ = 0;
     bool test_paused_ = false, test_resumed_ = false;
     bool ui_target_log_ = false;
-    // sc64.direct_mouse (default 1): position the mission cursor through the original setter (ADR-095).
-    bool direct_mouse_ = true;
+    // sc64.direct_mouse / sc64.direct_touch (default 1): position the mission
+    // cursor for mouse / touch targets through the original setter (ADR-095/099).
+    bool direct_mouse_ = true, direct_touch_ = true;
+    bool direct(input::Origin origin) const {
+        return origin == input::Origin::mouse ? direct_mouse_ : origin == input::Origin::touch && direct_touch_;
+    }
     std::optional<std::string> ui_selection_log_;
     std::optional<std::pair<double, double>> minimap_log_;
     std::map<int, input::PadOutput> pad_log_;

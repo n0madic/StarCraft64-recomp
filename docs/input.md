@@ -70,6 +70,7 @@ for the handoff, local-build risks and device acceptance checklist.
 | Move mouse over game image | In a 1P mission, place the original cursor at the mouse through its own setter (ADR-095/098); elsewhere, or with `sc64.direct_mouse=0`, steer it toward the mouse |
 | Mouse at an image edge, or over the letterbox beside it, in a mission | Z+stick: scroll the camera toward that edge (ADR-097/098); leaving the window stops it |
 | Left click / short one-finger tap | Reach point, then A (select/activate) |
+| Touch in a 1P mission (tap, drag, resting finger) | Place the original cursor at the finger through its setter, then the action below (ADR-099); no edge scrolling; `sc64.direct_touch=0` steers it with the stick |
 | Double one-finger tap / double left click on the map | Coalesce touches, reach point, then one B (contextual order) |
 | Right click / short two-finger tap | Reach point, then B (contextual order) |
 | Left / one-finger drag | Reach starting point, hold A, move to endpoint, release A |

@@ -2566,3 +2566,24 @@ verified: Windows/Linux pointers, a person's play, other maps, modal states beyo
 message, 2P, multiple displays and the system pointer's own feel. A corner button beside the
 letterbox still takes hover over its own area there. With `sc64.direct_mouse=0` a drag released at
 an edge still waits for the cursor (D-065).
+
+## ADR-099 — Direct cursor for touch taps and drags
+
+**Context:** With ADR-098 the desktop mouse places the original cursor at once, but a phone
+still steered it with the emulated stick (ADR-066/094) toward every tap and drag, so each
+order first waited for the cursor to travel across the image. ADR-098 kept touch off the
+setter only so that a tap would not become mouse hover that edge-scrolls the camera.
+
+**Decision:** Cursor targets carry an origin (`mouse`, `touch` or `other`). One-finger taps,
+double taps, two-finger tap orders, finger drags and a resting finger in a 1P mission use the
+same guarded setter as the mouse, with the same feedback-based arrival, A hold, release rule
+and neutral gaps. Touch hover never sends ADR-097's edge Z+stick, and a touch B pulse does not
+resume hover during its tail. A drag point in an edge band still returns to stick steering.
+Recipe points and UI fallback actions (`other`) stay stick-steered. `sc64.direct_touch`
+(default 1) turns the touch path off independently of `sc64.direct_mouse`; the virtual pad,
+two-finger camera, HUD, menus and minimap keep their existing ownership.
+
+**Consequences:** Synthetic fixtures cover a tap action, a resting finger, a finger drag and
+its release, touch hover at an edge without Z, `other` targets and both switches. Not verified:
+a phone run, a person's play, Adreno/Mali devices, multi-touch timing, and whether a cursor
+pinned under the last tap interferes with the virtual pad (D-066).

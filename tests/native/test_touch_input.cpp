@@ -49,7 +49,7 @@ struct MockNative final : NativeApi {
     std::pair<double, double> size{960, 720};
     struct Submitted { unsigned bits; double x, y; };
     std::optional<Submitted> submitted;
-    std::optional<Point> direct_mouse;
+    std::optional<Point> direct_point;
     bool direct_accepted = false;
     struct Vibration { int ms, amplitude; };
     std::vector<Vibration> vibrations;
@@ -93,8 +93,8 @@ struct MockNative final : NativeApi {
         if (player == 1) submitted = Submitted{buttons, x, y};
     }
     bool navigate_minimap(double, double, double, double) override { return false; }
-    bool position_mouse_cursor(std::optional<Point> point, double) override {
-        direct_mouse = point;
+    bool position_cursor(std::optional<Point> point, double) override {
+        direct_point = point;
         return point.has_value() && direct_accepted;
     }
     void set_cursor_hidden(const std::optional<std::array<double, 4>>& region) override { cursor_hidden = region; }
@@ -329,10 +329,10 @@ int main() {
         host.init();
         set_target(state.gestures, 250, 100);
         host.update(1.0 / 60);
-        CHECK(host_native.direct_mouse && host_native.submitted->x != 0);
+        CHECK(host_native.direct_point && host_native.submitted->x != 0);
         host_native.direct_accepted = true;
         host.update(1.0 / 60);
-        CHECK(host_native.direct_mouse && host_native.submitted->x == 0);
+        CHECK(host_native.direct_point && host_native.submitted->x == 0);
         set_target(state.gestures, 160, 0);
         host.update(1.0 / 60);
         CHECK(host_native.submitted->bits == button_z && host_native.submitted->y > 0);
@@ -349,38 +349,38 @@ int main() {
         host.update(1.0 / 60);
         CHECK(host_native.submitted->bits == 0 && host_native.submitted->y == 0);
         clear(state.gestures);
-        CHECK(enqueue(state.gestures, 220, 100, button_b, false, false, true));
+        CHECK(enqueue(state.gestures, 220, 100, button_b, false, false, Origin::mouse));
         host.update(1.0 / 60);
-        CHECK(host_native.direct_mouse && host_native.direct_mouse->x == 220 && host_native.submitted->x == 0);
+        CHECK(host_native.direct_point && host_native.direct_point->x == 220 && host_native.submitted->x == 0);
         pointer(state.gestures, "mouse", Phase::move, 180, 110, 20, false, &gi);
         CHECK(state.gestures.hover && state.gestures.hover->x == 180);
         CHECK(state.gestures.active && state.gestures.active->x == 220);
         clear(state.gestures);
-        CHECK(enqueue(state.gestures, 220, 100, button_b, false, false, true));
+        CHECK(enqueue(state.gestures, 220, 100, button_b, false, false, Origin::mouse));
         set_target(state.gestures, 180, 110);
         state.gestures.neutral_until = 30;
         host.update(1.0 / 60);
-        CHECK(host_native.direct_mouse && host_native.direct_mouse->x == 180);
+        CHECK(host_native.direct_point && host_native.direct_point->x == 180);
         CHECK(state.gestures.queue.size() == 1);
         state.gestures.pulse = Pulse{button_b, 29, 26};
         gi.fields = 25; host.update(1.0 / 60);
-        CHECK(!host_native.direct_mouse && host_native.submitted->bits == button_b);
+        CHECK(!host_native.direct_point && host_native.submitted->bits == button_b);
         gi.fields = 26; host.update(1.0 / 60);
-        CHECK(host_native.direct_mouse && host_native.direct_mouse->x == 180);
+        CHECK(host_native.direct_point && host_native.direct_point->x == 180);
         CHECK(host_native.submitted->bits == button_b);
         gi.fields = 20;
         clear(state.gestures); state.gestures.neutral_until = 0;
         state.gestures.drag = std::make_shared<Drag>();
         state.gestures.drag->x = 240; state.gestures.drag->y = 120;
-        state.gestures.drag->started = true; state.gestures.drag->direct_mouse = true;
+        state.gestures.drag->started = true; state.gestures.drag->origin = Origin::mouse;
         host.update(1.0 / 60);
-        CHECK(host_native.direct_mouse && host_native.direct_mouse->x == 240);
+        CHECK(host_native.direct_point && host_native.direct_point->x == 240);
         CHECK(host_native.submitted->bits == button_a && host_native.submitted->x == 0);
         // At an image edge the held-A drag returns to stick steering, which
         // pushes the cursor against the edge.
         state.gestures.drag->x = 319;
         host.update(1.0 / 60);
-        CHECK(!host_native.direct_mouse && host_native.submitted->bits == button_a && host_native.submitted->x > 0);
+        CHECK(!host_native.direct_point && host_native.submitted->bits == button_a && host_native.submitted->x > 0);
         // The original stops a held-A cursor at x 304 while the camera scrolls:
         // a release there ends the drag once a snapshot postdates the release.
         state.gestures.drag->released = true; state.gestures.drag->released_field = 20;
@@ -395,7 +395,7 @@ int main() {
         host_native.direct_accepted = false;
         state.gestures.drag = std::make_shared<Drag>();
         state.gestures.drag->x = 240; state.gestures.drag->y = 120;
-        state.gestures.drag->started = true; state.gestures.drag->direct_mouse = true;
+        state.gestures.drag->started = true; state.gestures.drag->origin = Origin::mouse;
         gi.fields = 40; gi.cursor_field = 40;
         host.update(1.0 / 60);
         state.gestures.drag->released = true; state.gestures.drag->released_field = 40;
@@ -403,20 +403,50 @@ int main() {
         host.update(1.0 / 60);
         CHECK(state.gestures.drag && !state.gestures.drag->direct_cursor && host_native.submitted->bits == button_a);
         host_native.direct_accepted = true;
-        // A touch tap leaves touch hover at its point, never direct mouse hover:
-        // a tap at an image edge must not keep scrolling the camera.
+        // A touch tap leaves touch hover at its point, never mouse hover: the
+        // setter holds the cursor there, but a tap at an image edge must not
+        // keep scrolling the camera (ADR-099).
         clear(state.gestures);
-        CHECK(enqueue(state.gestures, 319, 100, button_a, false, true, false));
-        CHECK(state.gestures.hover && state.gestures.hover->touch);
+        CHECK(enqueue(state.gestures, 319, 100, button_a, false, true, Origin::touch));
+        CHECK(state.gestures.hover && state.gestures.hover->origin == Origin::touch);
         state.gestures.queue.clear();
         host.update(1.0 / 60);
-        CHECK(!host_native.direct_mouse && !(host_native.submitted->bits & button_z));
+        CHECK(host_native.direct_point && host_native.direct_point->x == 319);
+        CHECK(host_native.submitted->bits == 0 && host_native.submitted->x == 0);
+        // A touch tap's action and a resting finger use the setter too; a
+        // recipe or UI-fallback target (Origin::other) never does.
+        clear(state.gestures);
+        CHECK(enqueue(state.gestures, 200, 90, button_a, false, true, Origin::touch));
+        host.update(1.0 / 60);
+        CHECK(host_native.direct_point && host_native.direct_point->x == 200 && host_native.submitted->x == 0);
+        clear(state.gestures);
+        CHECK(pointer(state.gestures, "1", Phase::down, 210, 80, 20, true, &gi));
+        host.update(1.0 / 60);
+        CHECK(host_native.direct_point && host_native.direct_point->x == 210);
+        clear(state.gestures);
+        CHECK(enqueue(state.gestures, 200, 90, button_a));
+        host.update(1.0 / 60);
+        CHECK(!host_native.direct_point && host_native.submitted->x != 0);
+        // A finger drag is positioned like a mouse drag and ends where the
+        // cursor is once a snapshot postdates its release.
+        clear(state.gestures);
+        CHECK(pointer(state.gestures, "1", Phase::down, 100, 100, 20, true, &gi));
+        CHECK(pointer(state.gestures, "1", Phase::move, 150, 120, 21, true, &gi));
+        CHECK(state.gestures.drag && state.gestures.drag->origin == Origin::touch);
+        state.gestures.drag->started = true; state.gestures.queue.clear();
+        host.update(1.0 / 60);
+        CHECK(host_native.direct_point && host_native.direct_point->x == 150);
+        CHECK(host_native.submitted->bits == button_a && state.gestures.drag->direct_cursor);
+        CHECK(pointer(state.gestures, "1", Phase::up, 150, 120, 20, true, &gi));
+        gi.fields = 23; gi.cursor_field = 23;
+        host.update(1.0 / 60);
+        CHECK(!state.gestures.drag && host_native.submitted->bits == 0);
         gi.fields = 20; gi.cursor_field = 20; gi.cursor_x = 100;
         clear(state.gestures);
         set_target(state.gestures, 250, 100);
         host.on_input("right", pressed_event());
         host.update(1.0 / 60);
-        CHECK(!host_native.direct_mouse && host_native.submitted->x != 0);
+        CHECK(!host_native.direct_point && host_native.submitted->x != 0);
         host.final();
         // sc64.direct_mouse=0 keeps the stick-steered cursor.
         Config off;
@@ -424,18 +454,37 @@ int main() {
         HostScript plain(state, host_native, off);
         plain.init();
         clear(state.gestures);
-        host_native.direct_mouse = Point{1, 1};
+        host_native.direct_point = Point{1, 1};
         set_target(state.gestures, 250, 100);
         plain.update(1.0 / 60);
-        CHECK(!host_native.direct_mouse && host_native.submitted->x != 0);
+        CHECK(!host_native.direct_point && host_native.submitted->x != 0);
         // Without the direct cursor a released drag still waits for arrival.
         clear(state.gestures);
         state.gestures.drag = std::make_shared<Drag>();
-        state.gestures.drag->x = 319; state.gestures.drag->y = 100; state.gestures.drag->direct_mouse = true;
+        state.gestures.drag->x = 319; state.gestures.drag->y = 100; state.gestures.drag->origin = Origin::mouse;
         state.gestures.drag->started = true; state.gestures.drag->released = true; state.gestures.drag->released_field = 10;
         plain.update(1.0 / 60);
         CHECK(state.gestures.drag && host_native.submitted->bits == button_a);
+        // sc64.direct_mouse=0 leaves touch on the setter.
+        clear(state.gestures);
+        CHECK(enqueue(state.gestures, 200, 90, button_a, false, true, Origin::touch));
+        plain.update(1.0 / 60);
+        CHECK(host_native.direct_point && host_native.direct_point->x == 200);
         plain.final();
+        // sc64.direct_touch=0 steers touch targets with the stick; mouse stays direct.
+        Config no_touch;
+        no_touch.set("sc64.direct_touch", "0");
+        HostScript stick_touch(state, host_native, no_touch);
+        stick_touch.init();
+        clear(state.gestures);
+        CHECK(enqueue(state.gestures, 200, 90, button_a, false, true, Origin::touch));
+        stick_touch.update(1.0 / 60);
+        CHECK(!host_native.direct_point && host_native.submitted->x != 0);
+        clear(state.gestures);
+        set_target(state.gestures, 250, 100);
+        stick_touch.update(1.0 / 60);
+        CHECK(host_native.direct_point && host_native.direct_point->x == 250);
+        stick_touch.final();
     }
     // A mission mouse over the letterbox of a wide window points at the nearest
     // image edge; leaving the window ends hover; a held drag keeps its edge

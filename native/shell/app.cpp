@@ -293,7 +293,7 @@ SDL_AppResult SDL_AppEvent(void* state, SDL_Event* event) {
         }
         case SDL_EVENT_WINDOW_MOUSE_LEAVE:
             app.shared.pointer.reset();
-            if (app.shared.gestures.hover && !app.shared.gestures.hover->touch) app.shared.gestures.hover.reset();
+            if (app.shared.gestures.hover && app.shared.gestures.hover->mouse()) app.shared.gestures.hover.reset();
             break;
         case SDL_EVENT_FINGER_DOWN:
         case SDL_EVENT_FINGER_MOTION:
