@@ -286,6 +286,8 @@ class UiEvidenceTest(unittest.TestCase):
         self.assertFalse(hover.check(drift)['hover_controller_accepted'])  # cursor leaves the target
         steer=rows+[self.direct_pad(112,200,120,stick=(.2,0))]
         self.assertFalse(hover.check(steer)['hover_controller_accepted'])  # no stick under the direct cursor
+        once=rows[:4]
+        self.assertFalse(hover.check(once)['hover_controller_accepted'])  # no later snapshot shows it stayed
 
     def test_hover_gate_accepts_z_edge_scroll_only_toward_the_targets_edge(self):
         top=lambda stick: self.direct_rows((160,0),self.direct_pad(101,160,0,0x2000,stick),

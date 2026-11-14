@@ -2545,10 +2545,13 @@ still inside the window, points at the nearest image edge; leaving the window
 (`SDL_EVENT_WINDOW_MOUSE_LEAVE`, or a hover outside it) ends hover. A held button keeps its contact,
 also outside the window while SDL captures the mouse. A press in the letterbox is still not a map
 click. A started selection drag whose point is in an edge band returns to stick steering, which
-pushes the held-A cursor against the edge and scrolls as the original does. With the direct cursor
-on, a released mouse drag ends where the cursor is once a snapshot postdates the release by the
-arrival margin, instead of waiting for its exact target. Hover at an edge keeps ADR-097's Z+stick.
-The pad telemetry marks direct rows (`source.direct`); `check_hover.py` schema 4 checks them.
+pushes the held-A cursor against the edge and scrolls as the original does. A released mouse drag
+whose cursor the setter has positioned ends where the cursor is once a snapshot postdates the release
+by the arrival margin, instead of waiting for its exact target; a drag the setter never positioned
+(setter missing, guards closed) waits for arrival as before. The hover a queued action leaves at its
+point keeps the action's origin, so a touch tap never becomes direct mouse hover or edge scrolling.
+Hover at an edge keeps ADR-097's Z+stick. The pad telemetry marks direct rows (`source.direct`);
+`check_hover.py` schema 4 checks them and needs a later snapshot to show the cursor stayed.
 
 **Consequences:** Synthetic fixtures cover the switch, the edge bands, letterbox clamping, leaving
 the window, a drag held outside the window, the drag edge handoff and the release, and the setter

@@ -97,15 +97,6 @@ const Sc64ModuleInfo& bind(SDL_SharedObject* object, const std::filesystem::path
 }
 }
 
-recomp_func_t* function_at(const Sc64ModuleInfo& info, std::uint32_t vram) {
-    for (std::size_t i = 0; i < info.num_sections; ++i) {
-        const auto& section = info.sections[i];
-        for (std::size_t j = 0; j < section.num_funcs; ++j)
-            if (section.ram_addr + section.funcs[j].offset == vram) return section.funcs[j].func;
-    }
-    return nullptr;
-}
-
 const Sc64ModuleInfo& load_file(const std::filesystem::path& file, std::string_view expected_rom_sha1) {
     // The handle of a module that is accepted is deliberately never released: guest threads may still run its code at exit.
     SDL_SharedObject* object = SDL_LoadObject(utf8(file).c_str());

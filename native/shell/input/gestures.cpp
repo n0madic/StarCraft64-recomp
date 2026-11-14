@@ -137,7 +137,9 @@ std::pair<int, int> edge_direction(double x, double y) {
 }
 
 bool enqueue(GestureState& s, double x, double y, unsigned buttons, bool hold, bool auto_pick, bool direct_mouse) {
-    if (s.queue.size() >= 8 || !set_target(s, x, y)) {
+    // The hover left at the action's point keeps its origin: only a mouse
+    // action leaves mouse hover that the direct cursor may take over.
+    if (s.queue.size() >= 8 || !set_target(s, x, y, !direct_mouse)) {
         s.notice = "Input queue full or point outside image"; return false;
     }
     auto action = std::make_shared<Action>();
@@ -380,8 +382,9 @@ PadOutput read(GestureState& s, const Info& info, bool blocked) {
     }
     // The original clamps a held-A cursor inside the image (x <= 304 measured)
     // while the camera scrolls, so an edge target can be unreachable. A released
-    // mouse drag ends where the cursor is once a snapshot postdates the release.
-    if (s.direct_cursor && s.drag && s.drag->started && s.drag->released && s.drag->direct_mouse
+    // mouse drag the setter positioned ends where the cursor is once a snapshot
+    // postdates the release; a stick-steered drag still waits for arrival.
+    if (s.drag && s.drag->started && s.drag->released && s.drag->direct_cursor
         && info.cursor_field.value_or(0) > s.drag->released_field + servo.arrival_margin) {
         s.drag.reset(); s.target.reset(); s.hover.reset(); s.neutral_until = field + 8; return {};
     }

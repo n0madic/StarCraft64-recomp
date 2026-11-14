@@ -390,6 +390,27 @@ int main() {
         gi.fields = 23; gi.cursor_field = 23;
         host.update(1.0 / 60);
         CHECK(!state.gestures.drag && host_native.submitted->bits == 0);
+        // A drag the setter never positioned (setter missing, guards closed) is
+        // stick-steered even with the switch on: its release waits for arrival.
+        host_native.direct_accepted = false;
+        state.gestures.drag = std::make_shared<Drag>();
+        state.gestures.drag->x = 240; state.gestures.drag->y = 120;
+        state.gestures.drag->started = true; state.gestures.drag->direct_mouse = true;
+        gi.fields = 40; gi.cursor_field = 40;
+        host.update(1.0 / 60);
+        state.gestures.drag->released = true; state.gestures.drag->released_field = 40;
+        gi.fields = 44; gi.cursor_field = 44;
+        host.update(1.0 / 60);
+        CHECK(state.gestures.drag && !state.gestures.drag->direct_cursor && host_native.submitted->bits == button_a);
+        host_native.direct_accepted = true;
+        // A touch tap leaves touch hover at its point, never direct mouse hover:
+        // a tap at an image edge must not keep scrolling the camera.
+        clear(state.gestures);
+        CHECK(enqueue(state.gestures, 319, 100, button_a, false, true, false));
+        CHECK(state.gestures.hover && state.gestures.hover->touch);
+        state.gestures.queue.clear();
+        host.update(1.0 / 60);
+        CHECK(!host_native.direct_mouse && !(host_native.submitted->bits & button_z));
         gi.fields = 20; gi.cursor_field = 20; gi.cursor_x = 100;
         clear(state.gestures);
         set_target(state.gestures, 250, 100);
@@ -431,6 +452,9 @@ int main() {
         CHECK(g.hover && g.hover->x == 0 && edge_direction(g.hover->x, g.hover->y) == std::pair(-1, 0));
         wide.on_input(nullopt, at(2500, 720));
         CHECK(g.hover && edge_direction(g.hover->x, g.hover->y) == std::pair(1, 0));
+        // A HiDPI pointer inside the bottom window row (rows from the bottom 0..1).
+        wide.on_input(nullopt, at(1000, .5));
+        CHECK(g.hover && edge_direction(g.hover->x, g.hover->y) == std::pair(0, 1));
         wide.on_input(nullopt, at(-3, 720));
         CHECK(!g.hover);
         { auto e = at(100, 720); e.pressed = true; wide.on_input("touch_mouse", e); }

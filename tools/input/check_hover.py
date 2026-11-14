@@ -102,12 +102,14 @@ def check(rows: list[dict]) -> dict:
             accepted=fresh and still
         elif any(r['source'].get('direct') for r in pads if 'source' in r):
             # Stick rows may precede the first acknowledged setter call; after it
-            # every row is direct, and the cursor arrives and stays at the target.
+            # every row is direct, and the cursor arrives and stays at the target:
+            # a later owned snapshot must confirm that it stayed.
             first=next(i for i,r in enumerate(pads) if r.get('source',{}).get('direct'))
             hits=[r for r in positions if abs(r['cursor_x']-move['x'])<=ARRIVAL_PIXELS
                 and abs(r['cursor_y']-move['y'])<=ARRIVAL_PIXELS]
             arrival=hits[0]['cursor_field'] if hits else None
             accepted=(fresh and arrival is not None and arrival-start<=DIRECT_ARRIVAL_FIELDS
+                and any(r['cursor_field']>arrival for r in positions)
                 and all(r.get('source',{}).get('direct') and direct_pad_ok(r,move) for r in pads[first:])
                 and all(abs(r['cursor_x']-move['x'])<=ARRIVAL_PIXELS and abs(r['cursor_y']-move['y'])<=ARRIVAL_PIXELS
                         for r in positions if r['cursor_field']>=arrival))

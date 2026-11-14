@@ -23,8 +23,7 @@ inline std::optional<MinimapProfile> read_minimap(std::span<const std::uint8_t> 
     if (ram.size()!=0x800000) return {};
     auto byte=[&](unsigned a) { return unsigned(ram[a^lane_xor]); };
     auto half=[&](unsigned a) { return int(std::int16_t((byte(a)<<8)|byte(a+1))); };
-    if (half(guest::physical(guest::game_mode))!=3 || byte(guest::physical(guest::split_screen)) || byte(0xa5b0e) || !byte(0xafd7c)
-        || half(0xf0c20) || byte(0xc6a64) || byte(0xfd038)) return {};
+    if (!guest::one_player_mission(ram,lane_xor) || !byte(0xafd7c)) return {};
     MinimapProfile p;
     p.x0=half(0xafd84); p.y0=half(0xafd86); p.x1=half(0xafd88); p.y1=half(0xafd8a);
     p.width=half(0xef670); p.height=half(0xef672);

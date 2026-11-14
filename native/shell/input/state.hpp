@@ -27,6 +27,10 @@ struct Action : Point {
 };
 struct Drag : Point {
     bool released = false, started = false, direct_mouse = false;
+    // Set by the host once the guest setter has positioned this mouse drag's
+    // cursor: on release it ends where the cursor is rather than on reaching
+    // its exact target (ADR-098). Never set while the setter is unavailable.
+    bool direct_cursor = false;
     double released_field = 0;
 };
 struct Contact {
@@ -109,9 +113,6 @@ struct GestureState {
     std::map<ContactId, std::shared_ptr<Contact>> contacts;
     std::string notice;
     bool enabled = true;
-    // Set by the host while sc64.direct_mouse is on: a mouse selection drag
-    // then ends on release rather than on reaching its exact target (ADR-098).
-    bool direct_cursor = false;
     std::shared_ptr<Point> target;
     std::shared_ptr<Action> active;
     std::optional<Radial> radial;

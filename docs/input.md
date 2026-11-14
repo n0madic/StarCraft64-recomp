@@ -533,9 +533,10 @@ Since ADR-094/095/098 the mouse in a 1P mission positions the original cursor di
 through the guarded original setter, and the stick steering above is its fallback (direct
 path off, not yet acknowledged, or a selection drag at an image edge). The fallback hover cap
 is 16 px/field with the ADR-066 horizon 3; horizon 1 hunted around a still target. A released
-mouse drag ends where the cursor is, because the original stops a held-A cursor at x 304 and
-scrolls instead. `check_hover.py` schema 4 accepts direct windows (arrival within the request
-age plus snapshot age, neutral or edge-scroll stick, cursor held at the target) and stick windows
+mouse drag that the setter positioned ends where the cursor is, because the original stops a
+held-A cursor at x 304 and scrolls instead. `check_hover.py` schema 4 accepts direct windows (arrival
+within the request age plus snapshot age, neutral or edge-scroll stick, cursor held at the target
+in a later snapshot) and stick windows
 (cap 16 + 0.5, plateau ≤ 3 + 3 fields, retreat ≤ 16 px). The `hud-04` figures above predate it.
 
 - Engine SHA-256: `784211838dd8cbe58f86e681d93f2801fb44f8682e4d0d8c004699026bb8f139`.

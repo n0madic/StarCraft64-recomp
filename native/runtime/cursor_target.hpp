@@ -41,14 +41,11 @@ public:
         const auto half = [&](unsigned a) { return (byte(a) << 8) | byte(a + 1); };
         const auto word = [&](unsigned a) { return (half(a) << 16) | half(a + 2); };
         // Exact instructions at the setter and its input-query hook, then the
-        // same 1P mission fence as the minimap setter: player byte, cursor lock
-        // (advisor/pause dialogs), build menu and camera-redraw byte (research.md).
+        // same 1P mission fence as the minimap setter.
         if (word(guest::physical(guest::cursor_setter)) != 0x00042400
             || word(guest::physical(guest::cursor_setter) + 4) != 0x00042403
             || word(guest::physical(guest::input_query)) != 0x27bdffd8
-            || half(guest::physical(guest::game_mode)) != 3
-            || byte(guest::physical(guest::split_screen)) || byte(0xa5b0e)
-            || half(0xf0c20) || byte(0xc6a64) || byte(0xfd038)) return {};
+            || !guest::one_player_mission(ram, 3)) return {};
         return target;
     }
 private:

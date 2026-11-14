@@ -533,34 +533,34 @@ void Native::set_pad(int player, unsigned buttons, double x, double y) {
     }
 }
 
-bool Native::navigate_minimap(double x, double y, double context, double source_field) {
+bool Native::accepts_mission_request(double source_field, std::uint64_t max_age) {
     auto& s = session();
-    const auto field = s.fields.load();
-    const bool valid = std::isfinite(context) && context >= 0 && context <= UINT32_MAX
-        && std::isfinite(source_field) && source_field >= 0 && source_field <= double(field)
-        && double(field) - source_field <= 12 && cursor_.minimap
-        && cursor_.minimap->context == context && cursor_.minimap->contains(x, y)
-        && source_field == double(cursor_.field) && scanout_visible_ && width_ == 320 && height_ == 240
+    const double field = double(s.fields.load());
+    return std::isfinite(source_field) && source_field >= 0 && source_field <= field
+        && field - source_field <= double(max_age) && scanout_visible_ && width_ == 320 && height_ == 240
         && ui_.mode == "game" && pause_policy_.input_active() && s.running && !s.paused;
+}
+
+bool Native::navigate_minimap(double x, double y, double context, double source_field) {
+    const bool valid = std::isfinite(context) && context >= 0 && context <= UINT32_MAX
+        && accepts_mission_request(source_field, 12) && cursor_.minimap
+        && cursor_.minimap->context == context && cursor_.minimap->contains(x, y)
+        && source_field == double(cursor_.field);
     if (valid) runtime::minimap_input().submit({x, y, std::uint32_t(context), std::uint64_t(source_field)});
     return valid;
 }
 
 bool Native::position_mouse_cursor(std::optional<input::Point> point, double source_field) {
-    auto& s = session();
-    const auto field = s.fields.load();
-    if (!point || !std::isfinite(source_field) || source_field < 0 || source_field > double(field)
-        || double(field) - source_field > 12 || !std::isfinite(point->x) || !std::isfinite(point->y)
-        || point->x < 0 || point->x >= 320 || point->y < 0 || point->y >= 240
-        || !cursor_.valid || !scanout_visible_ || width_ != 320 || height_ != 240
-        || ui_.mode != "game" || !pause_policy_.input_active() || !s.running || s.paused) {
+    if (!point || !std::isfinite(point->x) || !std::isfinite(point->y)
+        || point->x < 0 || point->x >= 320 || point->y < 0 || point->y >= 240 || !cursor_.valid
+        || !accepts_mission_request(source_field, runtime::cursor_request_max_age)) {
         runtime::cursor_input().clear();
         if (direct_cursor_active_) log::debug("SC64 direct mouse cursor inactive");
         direct_cursor_active_ = false;
         return false;
     }
     runtime::cursor_input().submit({point->x, point->y, std::uint64_t(source_field)});
-    const bool active = runtime::cursor_input().recently_applied(field);
+    const bool active = runtime::cursor_input().recently_applied(session().fields.load());
     if (active != direct_cursor_active_) log::debug("SC64 direct mouse cursor %s", active ? "active" : "inactive");
     direct_cursor_active_ = active;
     return active;

@@ -83,6 +83,9 @@ private:
     void load_probe_case();
     // The module a user picked, installed; then the stored ROM starts the game when there is one.
     ImportEvent import_module(const std::string& path);
+    // A guest setter request from the owned snapshot of `source_field`: at most
+    // `max_age` fields old, with the 1P mission visible and accepting input.
+    bool accepts_mission_request(double source_field, std::uint64_t max_age);
     const Config& config_;
     Window window_;
     std::string storage_;

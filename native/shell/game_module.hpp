@@ -3,6 +3,8 @@
 // the minimap setter. Desktop builds and the Android launcher load it from a module built out of the
 // generated C; the personal Android APK links it statically (game_static.cpp) and load() only reports it.
 #include "sc64_module.h"
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -58,5 +60,13 @@ const Sc64ModuleInfo& load_file(const std::filesystem::path& file, std::string_v
 // The loaded game; throws ModuleError before load().
 const Sc64ModuleInfo& info();
 // The recompiled function that starts at `vram` in the module's section table, or nullptr.
-recomp_func_t* function_at(const Sc64ModuleInfo& info, std::uint32_t vram);
+// Inline: it only reads the table, so the loaded module and the static game share it.
+inline recomp_func_t* function_at(const Sc64ModuleInfo& info, std::uint32_t vram) {
+    for (std::size_t i = 0; i < info.num_sections; ++i) {
+        const auto& section = info.sections[i];
+        for (std::size_t j = 0; j < section.num_funcs; ++j)
+            if (section.ram_addr + section.funcs[j].offset == vram) return section.funcs[j].func;
+    }
+    return nullptr;
+}
 }

@@ -388,7 +388,6 @@ void HostScript::update(double dt) {
             out.y = std::max(-1.0, std::min(1.0, out.y + touch.y));
         }
         if (player == 1) {
-            g.direct_cursor = direct_mouse_;
             const auto gesture = input::read(g, info, input_blocked);
             // Keyboard/gamepad steering takes ownership, discarding pending
             // pointer actions rather than adding two conflicting analog vectors.
@@ -505,6 +504,7 @@ void HostScript::update(double dt) {
                 source.direct = true;
                 out.x = 0; out.y = 0;
                 g.follow.reset();
+                if (g.drag) g.drag->direct_cursor = true;
                 // Original Z+stick pans without moving the guest cursor. Keep
                 // the direct pointer at the viewport edge while scrolling.
                 if (hover && !g.pulse && info.fields >= g.neutral_until && out.buttons == 0) {
@@ -883,7 +883,8 @@ bool GuiScript::contact(const std::optional<std::string>& id, const std::string&
     // nearest image edge: edge scrolling and selection drags then have a
     // physical stop in a wide window. Leaving the window ends hover (ADR-098);
     // a held button (SDL captures the mouse) keeps its drag at the edge.
-    const bool in_window = px >= 0 && py >= 0 && px < sw && py < sh;
+    // py counts rows from the bottom minus one, so the bottom row lies in (-1, 0].
+    const bool in_window = px >= 0 && py > -1 && px < sw && py < sh;
     if (!native && !is_touch && phase != Phase::down && mode_is(info, "game") && !g.pan && !g.ui && !g.minimap
         && (in_window || g.contacts.contains(key)))
         native = viewport::to_native_clamped(rect, px, py);
