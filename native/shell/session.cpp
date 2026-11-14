@@ -207,6 +207,20 @@ void Session::start_runtime(std::vector<std::uint8_t> rom, const std::filesystem
         *ctx = saved;
         runtime::cursor_input().applied(field);
     });
+    runtime::camera_input().clear();
+    runtime::set_camera_handler([](std::uint8_t* ram, void* context) {
+        auto& s = session();
+        const auto field = s.fields.load();
+        auto target = runtime::camera_input().take({ram, 0x800000}, field);
+        if (!target || s.paused || !s.running) return;
+        // The minimap's camera setter, with the same guest-thread discipline.
+        auto* ctx = static_cast<recomp_context*>(context);
+        const auto saved = *ctx;
+        ctx->r4 = target->x; ctx->r5 = target->y;
+        game::info().minimap_set_position(ram, ctx);
+        *ctx = saved;
+        runtime::camera_input().applied(field);
+    });
     runtime::set_minimap_handler([](std::uint8_t* ram, void* context, const runtime::MinimapTarget& target) {
         auto& s=session();
         const auto field=s.fields.load();
@@ -284,6 +298,7 @@ void Session::apply_pause_locked() {
     if (value) {
         for (auto& pad : pads) { pad.buttons = 0; pad.x = 0; pad.y = 0; }
         runtime::minimap_input().clear();
+        runtime::camera_input().clear();
     }
     if (value != paused.load()) audio::pause_changed();
     paused = value;

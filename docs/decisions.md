@@ -2587,3 +2587,26 @@ two-finger camera, HUD, menus and minimap keep their existing ownership.
 its release, touch hover at an edge without Z, `other` targets and both switches. Not verified:
 a phone run, a person's play, Adreno/Mali devices, multi-touch timing, and whether a cursor
 pinned under the last tap interferes with the virtual pad (D-066).
+
+## ADR-100 — Direct camera for two-finger and middle-button pans
+
+**Context:** A two-finger (or middle-button) pan steered the camera with the original Z+stick:
+two-field stick pulses of at most four scroll units followed by settle fields, so the camera
+trailed the fingers. The minimap already moves the camera through the original setter
+`0x8000B988`, which clamps a world-pixel position to the map, aligns it and updates the tile
+cache (research.md, direct minimap navigation).
+
+**Decision:** The pan's existing bounded camera target (start camera plus finger displacement)
+is submitted to a `CameraInbox` and applied by that setter on the guest input-query hook,
+with the guest context saved and restored, behind the same age, 1P mission and hook-instruction
+fences as the direct cursor. The shell submits a changed target at once and repeats an unchanged
+one only after the request window, and suppresses Z+stick only after the guest acknowledges a
+call. A two-finger pan follows `sc64.direct_touch`, a middle-button pan `sc64.direct_mouse`; with
+either off, or outside a guarded 1P mission, Z+stick steering remains.
+
+**Consequences:** Native fixtures cover the inbox fences, hook dispatch, the host handoff and
+both switches. A macOS recipe with two synthetic touch contacts in Wasteland from a copy of the
+player's save (`local/reports/pan-direct-4`) moved the camera from (-16,-16) by 60 half-world
+pixels on each axis, tracking every 4-pixel finger step about four fields later and stopping on
+the target, with no Z+stick rows and no `ERROR` lines. The recipe bypasses OS touch delivery.
+Not verified: a phone, a person's pans, fast flings, other maps and modal states (D-066).

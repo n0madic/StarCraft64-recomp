@@ -74,7 +74,7 @@ for the handoff, local-build risks and device acceptance checklist.
 | Double one-finger tap / double left click on the map | Coalesce touches, reach point, then one B (contextual order) |
 | Right click / short two-finger tap | Reach point, then B (contextual order) |
 | Left / one-finger drag | Reach starting point, hold A, move to endpoint, release A |
-| Middle mouse / two-finger drag | Z+stick camera steering (drag map toward fingers) |
+| Middle mouse / two-finger drag | In a 1P mission, move the camera with the fingers through the original camera setter (ADR-100); elsewhere, or with `sc64.direct_touch=0` / `sc64.direct_mouse=0`, Z+stick camera steering |
 | Double tap / left double click on an already selected unit | Reach the point, then R, R+A, R: select that unit type on screen (other double taps stay B) |
 | Tab / long stationary mouse press or touch (30 guest fields) | Open the hidden fallback panel (Continue, Back, menu arrows) |
 | Sandwich button, top-left corner of a 1P mission image | Start (original pause menu) |
@@ -103,8 +103,9 @@ A long mouse press or touch opens the fallback panel (two rows: Continue, menu u
 menu left, down, right); release, then click/tap a command. It is shown only while open.
 Build is reached through its HUD hint after selecting a worker; pause through the sandwich
 button or Back/Esc; the minimap through its corner button (ADR-071). Two-finger movement cancels the
-order gesture and uses the original Z+stick camera mode. The displacement from
-the initial finger midpoint sets a bounded camera target; stationary fingers
+order gesture. The displacement from the initial finger midpoint sets a bounded
+camera target, which the original camera setter applies directly (ADR-100), or,
+without it, the original Z+stick camera mode steers toward; stationary fingers
 stop scrolling once it is reached. Lifting either finger cancels steering. Camera world units and bounds remain owned by the game.
 Keyboard bindings are listed in `native/shell/app.cpp`; Enter is Start,
 X is A, C is B, Esc and Android Back are B aliases, WASD is stick, P is host pause. Mouse gameplay targets the scoped

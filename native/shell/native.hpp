@@ -65,6 +65,7 @@ public:
     void set_pad(int player, unsigned buttons, double x, double y) override;
     bool navigate_minimap(double x, double y, double context, double field) override;
     bool position_cursor(std::optional<input::Point> point, double field) override;
+    bool position_camera(std::optional<input::Point> point, double field) override;
     void set_cursor_hidden(const std::optional<std::array<double, 4>>& region) override;
     void vibrate(int milliseconds, int amplitude) override;
     void set_haptics(bool enabled) override;
@@ -101,6 +102,8 @@ private:
     desktop::PausePolicy pause_policy_;
     bool background_input_probe_ = false;
     bool cursor_requested_ = false, system_cursor_hidden_ = false, direct_cursor_active_ = false;
+    // Last camera position submitted for the original setter (world pixels).
+    std::optional<std::pair<std::int32_t, std::int32_t>> camera_request_;
     Sc64CursorRegion cursor_region_;
     desktop::CursorFeedback cursor_;
     desktop::UiFeedback ui_;

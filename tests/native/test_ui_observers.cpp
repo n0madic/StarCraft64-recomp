@@ -251,13 +251,14 @@ int main() {
         ++calls; dispatched=target;
     });
     auto& inbox=sc64::runtime::minimap_input();
-    static unsigned cursor_calls=0;
+    static unsigned cursor_calls=0, camera_calls=0;
     sc64::runtime::set_cursor_handler([](std::uint8_t*,void*) { ++cursor_calls; });
+    sc64::runtime::set_camera_handler([](std::uint8_t*,void*) { ++camera_calls; });
     before=ram; saved=font;
     inbox.submit({60,200,minimap->context,400});
-    sc64_ui_pick(ram.data(),&font,1); assert(calls==0 && cursor_calls==0);
+    sc64_ui_pick(ram.data(),&font,1); assert(calls==0 && cursor_calls==0 && camera_calls==0);
     sc64_ui_pick(ram.data(),&font,0);
-    assert(cursor_calls==1);
+    assert(cursor_calls==1 && camera_calls==1);
     assert(calls==1 && dispatched.x==1056 && dispatched.y==1088 && dispatched.field==400);
     assert(ram==before && !std::memcmp(&font,&saved,sizeof(font)));
     sc64_ui_pick(ram.data(),&font,0); assert(calls==1);
@@ -268,4 +269,5 @@ int main() {
     sc64_ui_pick(ram.data(),&font,0); assert(calls==1);
     sc64::runtime::set_minimap_handler(nullptr);
     sc64::runtime::set_cursor_handler(nullptr);
+    sc64::runtime::set_camera_handler(nullptr);
 }

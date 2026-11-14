@@ -56,6 +56,19 @@ int main() {
         put_word(0x37fe0, 0);
         inbox.submit({100, 100, 10}); CHECK(!inbox.take(ram, 10));
         inbox.applied(10); CHECK(inbox.recently_applied(22)); CHECK(!inbox.recently_applied(23));
+        // Camera requests share the age and 1P mission fences and need the
+        // original input-query hook, not the cursor setter.
+        CameraInbox camera;
+        camera.submit({640, -32, 10});
+        const auto taken = camera.take(ram, 11);
+        CHECK(taken && taken->x == 640 && taken->y == -32);
+        camera.submit({640, 0, 10}); CHECK(!camera.take(ram, 23));
+        put_byte(guest::physical(guest::split_screen), 1);
+        camera.submit({640, 0, 10}); CHECK(!camera.take(ram, 10));
+        put_byte(guest::physical(guest::split_screen), 0);
+        put_word(0x1ae94, 0);
+        camera.submit({640, 0, 10}); CHECK(!camera.take(ram, 10));
+        camera.applied(10); CHECK(camera.recently_applied(22)); camera.clear(); CHECK(!camera.recently_applied(10));
     }
     pads::State state;
     in(state, "a", {.pressed = true, .value = 1}, 10);

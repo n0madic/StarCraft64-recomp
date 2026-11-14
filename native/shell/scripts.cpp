@@ -517,6 +517,21 @@ void HostScript::update(double dt) {
                 }
             }
         }
+        if (player == 1) {
+            // A middle-button or two-finger pan moves the camera to its target
+            // through the original setter instead of Z+stick steering (ADR-100).
+            std::optional<Point> camera;
+            const CameraGesture* pan = g.pan ? static_cast<const CameraGesture*>(&*g.pan)
+                : g.two && g.two->moved ? &*g.two : nullptr;
+            if (pan && pan->camera_x && pan->camera_y && direct(g.pan ? Origin::mouse : Origin::touch)
+                && !input_blocked && !source.controller && !source.touch && !source.recipe)
+                camera = Point{*pan->camera_x, *pan->camera_y};
+            if (native_.position_camera(camera, info.fields) && camera) {
+                source.direct = true;
+                out = {};
+                g.camera_drive.reset();
+            }
+        }
         if (input_blocked) out = {};
         if (player == 1) {
             const auto navigation = take_minimap(g, info);

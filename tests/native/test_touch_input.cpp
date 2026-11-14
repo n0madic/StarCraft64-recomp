@@ -93,6 +93,12 @@ struct MockNative final : NativeApi {
         if (player == 1) submitted = Submitted{buttons, x, y};
     }
     bool navigate_minimap(double, double, double, double) override { return false; }
+    std::optional<Point> camera_point;
+    bool camera_accepted = false;
+    bool position_camera(std::optional<Point> point, double) override {
+        camera_point = point;
+        return point.has_value() && camera_accepted;
+    }
     bool position_cursor(std::optional<Point> point, double) override {
         direct_point = point;
         return point.has_value() && direct_accepted;
@@ -471,6 +477,31 @@ int main() {
         plain.update(1.0 / 60);
         CHECK(host_native.direct_point && host_native.direct_point->x == 200);
         plain.final();
+        // A moved two-finger pan places the camera at its target through the
+        // setter; until the setter acknowledges it, Z+stick steers as before.
+        HostScript pan_host(state, host_native, config);
+        pan_host.init();
+        clear(state.gestures);
+        gi.camera_valid = true; gi.camera_divisor = 2; gi.camera_x = 100; gi.camera_y = 100;
+        gi.camera_min_x = -16; gi.camera_max_x = 720; gi.camera_min_y = -16; gi.camera_max_y = 800;
+        gi.fields = 30; gi.cursor_field = 30; gi.ui_field = 30;
+        CHECK(pointer(state.gestures, "1", Phase::down, 100, 100, 30, true, &gi));
+        CHECK(pointer(state.gestures, "2", Phase::down, 140, 100, 30, true, &gi));
+        CHECK(pointer(state.gestures, "1", Phase::move, 60, 100, 30, true, &gi));
+        CHECK(pointer(state.gestures, "2", Phase::move, 100, 100, 30, true, &gi));
+        pan_host.update(1.0 / 60);
+        CHECK(host_native.camera_point && host_native.camera_point->x == 140 && host_native.camera_point->y == 100);
+        CHECK(host_native.submitted->bits == button_z);
+        host_native.camera_accepted = true;
+        CHECK(pointer(state.gestures, "1", Phase::move, 40, 100, 31, true, &gi));
+        CHECK(pointer(state.gestures, "2", Phase::move, 80, 100, 31, true, &gi));
+        pan_host.update(1.0 / 60);
+        CHECK(host_native.camera_point && host_native.camera_point->x == 160);
+        CHECK(host_native.submitted->bits == 0 && host_native.submitted->x == 0 && !state.gestures.camera_drive);
+        clear(state.gestures);
+        pan_host.update(1.0 / 60);
+        CHECK(!host_native.camera_point);
+        pan_host.final();
         // sc64.direct_touch=0 steers touch targets with the stick; mouse stays direct.
         Config no_touch;
         no_touch.set("sc64.direct_touch", "0");
@@ -484,6 +515,20 @@ int main() {
         set_target(state.gestures, 250, 100);
         stick_touch.update(1.0 / 60);
         CHECK(host_native.direct_point && host_native.direct_point->x == 250);
+        // ...and two-finger pans with Z+stick; a middle-button pan stays direct.
+        clear(state.gestures);
+        CHECK(pointer(state.gestures, "1", Phase::down, 100, 100, 30, true, &gi));
+        CHECK(pointer(state.gestures, "2", Phase::down, 140, 100, 30, true, &gi));
+        CHECK(pointer(state.gestures, "1", Phase::move, 60, 100, 30, true, &gi));
+        CHECK(pointer(state.gestures, "2", Phase::move, 100, 100, 30, true, &gi));
+        stick_touch.update(1.0 / 60);
+        CHECK(!host_native.camera_point && host_native.submitted->bits == button_z);
+        clear(state.gestures);
+        pan_pointer(state.gestures, Phase::down, 100, 100);
+        pan_pointer(state.gestures, Phase::move, 60, 100);
+        stick_touch.update(1.0 / 60);
+        CHECK(host_native.camera_point && host_native.camera_point->x == 140 && host_native.submitted->bits == 0);
+        host_native.camera_accepted = false;
         stick_touch.final();
     }
     // A mission mouse over the letterbox of a wide window points at the nearest

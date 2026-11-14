@@ -90,6 +90,7 @@ void Native::apply_pause() {
         for (auto& pad : s.pads) { pad.buttons = 0; pad.x = 0; pad.y = 0; }
         runtime::minimap_input().clear();
         runtime::cursor_input().clear();
+        runtime::camera_input().clear();
     }
     if (user_paused_ || inactive_ || iconified_) { cursor_requested_ = false; restore_cursor(); }
 }
@@ -564,6 +565,28 @@ bool Native::position_cursor(std::optional<input::Point> point, double source_fi
     if (active != direct_cursor_active_) log::debug("SC64 direct cursor %s", active ? "active" : "inactive");
     direct_cursor_active_ = active;
     return active;
+}
+
+bool Native::position_camera(std::optional<input::Point> point, double source_field) {
+    if (!point || !std::isfinite(point->x) || !std::isfinite(point->y) || !cursor_.camera_valid
+        || !accepts_mission_request(source_field, runtime::cursor_request_max_age)) {
+        runtime::camera_input().clear();
+        camera_request_.reset();
+        return false;
+    }
+    // Snapshot units are half world pixels.
+    const auto world = [](double v, float low, float high) {
+        return std::int32_t(std::lround(std::clamp(v, double(low), double(high)) * 2));
+    };
+    const std::pair target{world(point->x, cursor_.camera_min_x, cursor_.camera_max_x),
+                           world(point->y, cursor_.camera_min_y, cursor_.camera_max_y)};
+    const auto field = session().fields.load();
+    // Stationary fingers repeat the target; the setter rebuilds the tile cache,
+    // so call it again only once its last call leaves the request window.
+    if (camera_request_ == target && runtime::camera_input().recently_applied(field)) return true;
+    camera_request_ = target;
+    runtime::camera_input().submit({target.first, target.second, std::uint64_t(source_field)});
+    return runtime::camera_input().recently_applied(field);
 }
 
 void Native::set_cursor_hidden(const std::optional<std::array<double, 4>>& region) {

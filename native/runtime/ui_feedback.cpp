@@ -23,6 +23,7 @@ thread_local bool b_hint_pending = false;
 bool hud_complete = false;
 std::atomic<sc64::runtime::MinimapHandler> minimap_handler{nullptr};
 std::atomic<sc64::runtime::CursorHandler> cursor_handler{nullptr};
+std::atomic<sc64::runtime::CursorHandler> camera_handler{nullptr};
 bool address(std::uint32_t a, unsigned length) {
     return a >= 0x80000000 && a <= 0x80800000 - length;
 }
@@ -62,8 +63,14 @@ sc64::runtime::CursorInbox& sc64::runtime::cursor_input() {
     return inbox;
 }
 void sc64::runtime::set_cursor_handler(CursorHandler handler) { cursor_handler=handler; }
+sc64::runtime::CameraInbox& sc64::runtime::camera_input() {
+    static CameraInbox inbox;
+    return inbox;
+}
+void sc64::runtime::set_camera_handler(CursorHandler handler) { camera_handler=handler; }
 
 extern "C" void sc64_ui_pick(std::uint8_t* ram, recomp_context* ctx, unsigned kind) {
+    if (kind == 0) if (auto handler = camera_handler.load()) handler(ram, ctx);
     if (kind == 0) if (auto handler = cursor_handler.load()) {
         // The handler verifies the request age against the live guest field.
         handler(ram, ctx);
