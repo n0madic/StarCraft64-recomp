@@ -245,6 +245,11 @@ std::optional<Point> to_native(const std::optional<Rect>& rect, double x, double
     point->y = std::clamp(point->y, 0.0, std::nextafter(rect->nh, 0.0));
     return point;
 }
+std::optional<Point> to_native_clamped(const std::optional<Rect>& rect, double x, double y) {
+    if (!rect) return std::nullopt;
+    return to_native(rect, std::clamp(x, rect->x, std::nextafter(rect->x + rect->width, rect->x)),
+                     std::clamp(y, rect->y, std::nextafter(rect->y + rect->height, rect->y)));
+}
 }
 
 namespace cursor_policy {

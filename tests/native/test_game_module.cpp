@@ -231,6 +231,9 @@ int main(int argc, char** argv) {
     CHECK(info.sections[0].funcs[0].func == info.entrypoint);
     info.entrypoint(nullptr, nullptr);
     info.minimap_set_position(nullptr, nullptr);
+    CHECK(game::function_at(info, std::uint32_t(info.sections[0].ram_addr + info.sections[0].funcs[0].offset))
+          == info.entrypoint);
+    CHECK(game::function_at(info, 0x80037fe2u) == nullptr);
     {
         SDL_SharedObject* object = SDL_LoadObject(good.string().c_str());
         auto calls = reinterpret_cast<int (*)()>(SDL_LoadFunction(object, "fixture_entrypoint_calls"));

@@ -48,6 +48,10 @@ using History = std::map<int, std::pair<double, double>>;
 }
 
 int main() {
+    // Edge-scroll bands: two native pixels at each image edge.
+    assert(edge_direction(0, 120) == std::pair(-1, 0) && edge_direction(1.9, 120) == std::pair(-1, 0));
+    assert(edge_direction(2, 120) == std::pair(0, 0) && edge_direction(317.9, 120) == std::pair(0, 0));
+    assert(edge_direction(318, 0) == std::pair(1, -1) && edge_direction(160, 239.9) == std::pair(0, 1));
     GestureState s;
     Info info;
     info.fields = 0; info.cursor_field = 0; info.cursor_x = 160; info.cursor_y = 120; info.cursor_valid = true;
@@ -156,8 +160,11 @@ int main() {
         }
         assert(clicked && "servo must converge before the bounded action timeout");
     }
-    // Free mouse hover (see motion() above).
-    for (int lag : {0, 1, 3}) for (double divisor : {150.0, 200.0}) {
+    // Free mouse hover (see motion() above). `pipeline` 1 is the measured
+    // native timing: a stick submitted in field f moves the cursor between
+    // snapshots f and f+1 while the observed snapshot is two fields old
+    // (lag 1); horizon 1 hunted around a still target there (ADR-094).
+    for (int pipeline : {0, 1}) for (int lag : {0, 1, 3}) for (double divisor : {150.0, 200.0}) {
         GestureState hs;
         Info hf;
         hf.fields = 0; hf.cursor_field = 0; hf.cursor_valid = true; hf.cursor_x = 160; hf.cursor_y = 120;
@@ -166,6 +173,7 @@ int main() {
         History history{{0, {cx, cy}}};
         double tx = 275, ty = 42;
         int idle = 0;
+        std::pair<double, double> previous_stick{0, 0};
         pointer(hs, "mouse", Phase::move, tx, ty, 0, false);
         for (int f = 1; f <= 260; ++f) {
             if (f == 100) { tx = 80; ty = 190; pointer(hs, "mouse", Phase::move, tx, ty, f, false); }
@@ -174,13 +182,16 @@ int main() {
             std::tie(hf.cursor_x, hf.cursor_y) = history.at(observed);
             const auto r = read(hs, hf, false);
             assert(r.buttons == 0 && !hs.drive && !hs.active);
-            const auto [dx, dy] = motion(r.x, r.y, divisor);
-            if (f == 1) assert(std::hypot(dx, dy) > 8.3 && "mouse hover must exceed the old 8 px/field limit");
+            const auto [sx, sy] = pipeline ? previous_stick : std::pair{r.x, r.y};
+            previous_stick = {r.x, r.y};
+            const auto [dx, dy] = motion(sx, sy, divisor);
+            if (f == 1 + pipeline) assert(std::hypot(dx, dy) > 8.3 && "mouse hover must exceed the old 8 px/field limit");
             assert(std::sqrt(dx * dx + dy * dy) <= servo.hover_step_cap + .3 && "hover must not skip large areas");
             idle = (std::abs(tx - cx) + std::abs(ty - cy) > 20 && r.x == 0 && r.y == 0) ? idle + 1 : 0;
             assert(idle < 4 && "hover must not have an eight-field settle gap");
             cx = cx + dx; cy = cy + dy; history[f] = {cx, cy};
-            if (f == 95) { assert(std::abs(cx - tx) < 1.5 && std::abs(cy - ty) < 1.5); }
+            // Arrived and still: no hunting around the target.
+            if (f >= 80 && f < 100) assert(std::abs(cx - tx) < 1.5 && std::abs(cy - ty) < 1.5);
         }
         assert(std::abs(cx - tx) < 1.5 && std::abs(cy - ty) < 1.5);
         hf.cursor_field = 240;

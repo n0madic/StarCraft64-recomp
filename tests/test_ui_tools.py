@@ -217,7 +217,7 @@ class UiEvidenceTest(unittest.TestCase):
     def test_hover_gate_requires_arrival_bounded_motion_and_hud_interception(self):
         rows=self.hover_rows()
         self.assertTrue(hover.check(rows)['hover_controller_accepted'])
-        rows[2]['cursor_x']=60 # 12.5 px/field exceeds the ADR-066 cap plus margin
+        rows[2]['cursor_x']=80 # 17.5 px/field exceeds the ADR-094 cap plus margin
         self.assertFalse(hover.check(rows)['hover_controller_accepted'])
         rows[2]['cursor_x']=18; rows[5]['x']=.3
         self.assertFalse(hover.check(rows)['hover_controller_accepted'])
@@ -230,13 +230,14 @@ class UiEvidenceTest(unittest.TestCase):
         return [dict(kind='hover',at=100,mode='game',source_field=99,x=20,y=20,hud=False),
                 *[self.hover_pad(*pad) for pad in pads]]
 
-    def test_hover_gate_accepts_adr066_speed_and_a_short_coasting_plateau(self):
-        # 8 px/field would fail the former 3.5 px/field gate. The stick is released
-        # at 24 px for two fields (the host logs the zero row once) while coasting.
-        rows=self.approach_rows((101,-20,.5),(103,-4,0),(105,12,.2),(107,19.5,0))
+    def test_hover_gate_accepts_adr094_speed_and_a_short_coasting_plateau(self):
+        # 16 px/field would fail the former 8 px/field gate. The stick is released
+        # at 16 px for two fields (the host logs the zero row once) while coasting.
+        rows=self.approach_rows((101,-28,.5),(103,4,0),(105,12,.2),(107,19.5,0))
         result=hover.check(rows)
         self.assertTrue(result['hover_controller_accepted'], result['observations'][0])
-        self.assertEqual(result['schema'],3)
+        self.assertEqual(result['schema'],4)
+        self.assertEqual(result['observations'][0]['mode'],'stick')
 
     def test_hover_gate_rejects_a_long_zero_stick_plateau_the_host_logs_once(self):
         # The host logs a pad row only when the stick changes, so a stall far from
@@ -253,7 +254,7 @@ class UiEvidenceTest(unittest.TestCase):
         # A 3 px overshoot is within one step of coasting (observed up to 2.4 px).
         near=self.approach_rows((101,10,.5),(103,23,.1),(105,19.5,0))
         self.assertTrue(hover.check(near)['hover_controller_accepted'])
-        far=self.approach_rows((101,10,.5),(103,19,0.2),(105,5,.5),(107,19.5,0))
+        far=self.approach_rows((101,10,.5),(103,19,0.2),(105,-5,.5),(107,19.5,0))  # 24 px back exceeds one 16 px step
         self.assertFalse(hover.check(far)['hover_controller_accepted'])
 
     def test_hover_gate_rejects_stale_sparse_and_stationary_without_arrival(self):
@@ -263,6 +264,35 @@ class UiEvidenceTest(unittest.TestCase):
         rows[0]['source_field']=99; rows[3]['cursor_x']=18
         self.assertFalse(hover.check(rows)['hover_controller_accepted'])
         self.assertFalse(hover.check(rows[:2])['hover_controller_accepted'])
+
+    @staticmethod
+    def direct_pad(at,x,y=20,buttons=0,stick=(0,0),direct=True):
+        return dict(kind='pad',at=at,ui_mode='game',cursor_field=at-2,cursor_x=x,cursor_y=y,buttons=buttons,
+                    x=stick[0],y=stick[1],source=dict(gesture=True,direct=direct))
+
+    def direct_rows(self,target=(200,120),*pads):
+        return [dict(kind='hover',at=100,mode='game',source_field=99,x=target[0],y=target[1],hud=False),*pads]
+
+    def test_hover_gate_accepts_a_direct_cursor_jump_after_a_stick_field(self):
+        rows=self.direct_rows((200,120),self.direct_pad(101,20,120,stick=(.5,0),direct=False),
+            self.direct_pad(102,30,120),dict(kind='info',at=104,ui_mode='game',cursor_field=103,cursor_x=200,cursor_y=120),
+            dict(kind='info',at=110,ui_mode='game',cursor_field=109,cursor_x=200,cursor_y=120))
+        result=hover.check(rows)
+        self.assertTrue(result['hover_controller_accepted'], result['observations'][0])
+        self.assertEqual(result['observations'][0]['mode'],'direct')
+        late=[dict(r) for r in rows]; late[3]['at']=130; late[3]['cursor_field']=129; del late[4]
+        self.assertFalse(hover.check(late)['hover_controller_accepted'])  # arrives after the request age bound
+        drift=rows+[dict(kind='info',at=116,ui_mode='game',cursor_field=115,cursor_x=190,cursor_y=120)]
+        self.assertFalse(hover.check(drift)['hover_controller_accepted'])  # cursor leaves the target
+        steer=rows+[self.direct_pad(112,200,120,stick=(.2,0))]
+        self.assertFalse(hover.check(steer)['hover_controller_accepted'])  # no stick under the direct cursor
+
+    def test_hover_gate_accepts_z_edge_scroll_only_toward_the_targets_edge(self):
+        top=lambda stick: self.direct_rows((160,0),self.direct_pad(101,160,0,0x2000,stick),
+            dict(kind='info',at=104,ui_mode='game',cursor_field=103,cursor_x=160,cursor_y=0))
+        self.assertTrue(hover.check(top((0,.5)))['hover_controller_accepted'])
+        self.assertFalse(hover.check(top((0,-.5)))['hover_controller_accepted'])
+        self.assertEqual(hover.edge_direction(319,239),(1,1))
 
     def test_unchanged_zero_stick_is_carried_across_hud_hover(self):
         rows=self.hover_rows()

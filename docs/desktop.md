@@ -237,6 +237,15 @@ keyboard feeds player 1. South/East/Start/shoulders/D-pad, left stick, right
 stick (C buttons) and left trigger (Z) follow the former bindings. A short press
 is latched for six VI fields. One game session is allowed per process.
 
+In a 1P mission the mouse places the original game cursor directly (ADR-095/098), so the
+cursor sits under the pointer instead of travelling at stick speed. Pushing the pointer
+against an image edge, or over the black bar beside it in a wide window, scrolls the camera.
+Two options are passed to a directly started app as arguments:
+
+- `--config=sc64.direct_mouse=0` steers the cursor with the emulated stick instead, as before.
+- `--config=sc64.low_latency_present=1` turns VSync off and caps the shell loop at 240 Hz
+  (ADR-096). It may tear and use more power; its latency benefit is not measured.
+
 ## Time, audio and shutdown
 
 The VI thread schedules nominal 60 fields/s independently of presentation. The
@@ -281,6 +290,9 @@ SDL3 shell evidence (2026-10-11, `local/reports/sdl3-migration/`):
   `check_hover` (schema 2, ADR-066 cap) and `check_hud`/`check_gestures` pass on
   `hud-03` (D-055). One repeat run, `hud-02`, diverged in the menu after a main-loop stall (D-056).
 - [x] Windows build `wine-07` under Wine 11.17: menu, WASAPI audio, Direct3D.
+- [x] macOS direct mouse cursor with OS pointer events from automated desktop control
+  (`mouse-direct-1`/`-2`, ADR-098): hover, selection box, three right-click orders, HUD Move,
+  four edges, full-screen letterbox, drag released at an edge. Not a person's play (D-065).
 - [ ] Native Windows/Linux runs and physical mouse/gamepad on the shell (D-054).
 
 Do not promote the open checks based only on a build or unit tests.

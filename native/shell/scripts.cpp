@@ -229,6 +229,7 @@ void HostScript::window_event(WindowEvent event) {
 
 void HostScript::init() {
     native_.set_haptics(config_.number("sc64.haptics", 1) == 1);
+    direct_mouse_ = config_.number("sc64.direct_mouse", 1) == 1;
     elapsed = 0; next_log_ = 0; paused = false;
     shared_.user_paused = false;
     recipe.clear();
@@ -377,7 +378,7 @@ void HostScript::update(double dt) {
     const double input_height = config_.number("display.height", design_height);
     for (int player = 1; player <= 2; ++player) {
         auto out = pad_state::read(pads_, player, info.fields);
-        struct { bool controller = false, touch = false, gesture = false, recipe = false; } source;
+        struct { bool controller = false, touch = false, gesture = false, recipe = false, direct = false; } source;
         source.controller = out.buttons != 0 || out.x != 0 || out.y != 0;
         if (player == shared_.pad.player) {
             const auto touch = touch_pad::read(shared_.pad, info.fields, input_width, input_height);
@@ -387,6 +388,7 @@ void HostScript::update(double dt) {
             out.y = std::max(-1.0, std::min(1.0, out.y + touch.y));
         }
         if (player == 1) {
+            g.direct_cursor = direct_mouse_;
             const auto gesture = input::read(g, info, input_blocked);
             // Keyboard/gamepad steering takes ownership, discarding pending
             // pointer actions rather than adding two conflicting analog vectors.
@@ -482,14 +484,17 @@ void HostScript::update(double dt) {
         }
         if (player == 1) {
             std::optional<Point> mouse;
-            const bool eligible = !input_blocked && !source.controller && !source.touch && !source.recipe
+            const bool eligible = direct_mouse_ && !input_blocked && !source.controller && !source.touch && !source.recipe
                 && !g.ui && !g.pan && !g.two && !g.radial && !g.seq;
+            const bool dragging = g.drag && g.drag->started;
             bool hover = false;
             if (eligible && !g.pulse && info.fields >= g.neutral_until && g.target
-                && ((g.active && g.active->direct_mouse)
-                                         || (g.drag && g.drag->started && g.drag->direct_mouse)))
-                mouse = Point{g.target->x, g.target->y};
-            else if (eligible && g.hover && !g.hover->touch && !g.active && !g.drag
+                && ((g.active && g.active->direct_mouse) || (dragging && g.drag->direct_mouse))) {
+                // A selection drag at an edge returns to stick steering, which
+                // pushes the held-A cursor against the edge (ADR-098).
+                if (!dragging || edge_direction(g.target->x, g.target->y) == std::pair{0, 0})
+                    mouse = Point{g.target->x, g.target->y};
+            } else if (eligible && g.hover && !g.hover->touch && !g.active && !g.drag
                      && std::all_of(g.queue.begin(), g.queue.end(), [](const auto& action) { return action->direct_mouse; })
                      && g.contacts.empty() && (!g.pulse || (g.pulse->mouse_hover_after
                         && info.fields >= *g.pulse->mouse_hover_after))) {
@@ -497,16 +502,15 @@ void HostScript::update(double dt) {
                 hover = true;
             }
             if (native_.position_mouse_cursor(mouse, info.fields) && mouse) {
+                source.direct = true;
                 out.x = 0; out.y = 0;
                 g.follow.reset();
                 // Original Z+stick pans without moving the guest cursor. Keep
                 // the direct pointer at the viewport edge while scrolling.
                 if (hover && !g.pulse && info.fields >= g.neutral_until && out.buttons == 0) {
-                    if (mouse->x <= 1) out.x = -.5;
-                    else if (mouse->x >= 318) out.x = .5;
-                    if (mouse->y <= 1) out.y = .5;
-                    else if (mouse->y >= 238) out.y = -.5;
-                    if (out.x != 0 || out.y != 0) out.buttons |= button_z;
+                    const auto [ex, ey] = edge_direction(mouse->x, mouse->y);
+                    out.x = ex * .5; out.y = -ey * .5;
+                    if (ex != 0 || ey != 0) out.buttons |= button_z;
                 }
             }
         }
@@ -535,7 +539,8 @@ void HostScript::update(double dt) {
             auto row = to_json(info);
             nlohmann::json logged{{"stage", "submitted"}, {"player", player},
                 {"source", {{"controller", source.controller}, {"touch", source.touch},
-                            {"gesture", source.gesture}, {"recipe", source.recipe}}},
+                            {"gesture", source.gesture}, {"recipe", source.recipe},
+                            {"direct", source.direct}}},
                 {"field", number(info.fields)}, {"buttons", out.buttons}, {"x", number(out.x)}, {"y", number(out.y)}};
             for (const char* key : {"cursor_x", "cursor_y", "cursor_field", "camera_x", "camera_y", "camera_valid",
                                     "ui_mode", "ui_token", "ui_field", "ui_context", "cursor_pick", "pick_required",
@@ -873,7 +878,15 @@ bool GuiScript::contact(const std::optional<std::string>& id, const std::string&
         if (const auto raw = viewport::to_native_raw(rect, px, py))
             if (button_pointer(g, key, phase, raw->x, raw->y, info, is_touch)) return true;
     }
-    const auto native = viewport::to_native(rect, px, py);
+    auto native = viewport::to_native(rect, px, py);
+    // In a mission a desktop mouse over the letterbox keeps pointing at the
+    // nearest image edge: edge scrolling and selection drags then have a
+    // physical stop in a wide window. Leaving the window ends hover (ADR-098);
+    // a held button (SDL captures the mouse) keeps its drag at the edge.
+    const bool in_window = px >= 0 && py >= 0 && px < sw && py < sh;
+    if (!native && !is_touch && phase != Phase::down && mode_is(info, "game") && !g.pan && !g.ui && !g.minimap
+        && (in_window || g.contacts.contains(key)))
+        native = viewport::to_native_clamped(rect, px, py);
     if (!native) {
         g.hud_mouse.reset();
         if (!is_touch && g.hover && !g.hover->touch) g.hover.reset();

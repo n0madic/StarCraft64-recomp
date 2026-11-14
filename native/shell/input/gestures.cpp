@@ -131,6 +131,11 @@ bool set_target(GestureState& s, double x, double y, bool touch) {
     return true;
 }
 
+std::pair<int, int> edge_direction(double x, double y) {
+    constexpr double band = 2;
+    return {x < band ? -1 : x >= 320 - band ? 1 : 0, y < band ? -1 : y >= 240 - band ? 1 : 0};
+}
+
 bool enqueue(GestureState& s, double x, double y, unsigned buttons, bool hold, bool auto_pick, bool direct_mouse) {
     if (s.queue.size() >= 8 || !set_target(s, x, y)) {
         s.notice = "Input queue full or point outside image"; return false;
@@ -372,6 +377,13 @@ PadOutput read(GestureState& s, const Info& info, bool blocked) {
         // Losing gameplay feedback never turns a terrain click into an A pulse.
         if (s.drag && s.drag->started) { clear(s); s.notice = "Cursor feedback lost; selection cancelled"; }
         return {};
+    }
+    // The original clamps a held-A cursor inside the image (x <= 304 measured)
+    // while the camera scrolls, so an edge target can be unreachable. A released
+    // mouse drag ends where the cursor is once a snapshot postdates the release.
+    if (s.direct_cursor && s.drag && s.drag->started && s.drag->released && s.drag->direct_mouse
+        && info.cursor_field.value_or(0) > s.drag->released_field + servo.arrival_margin) {
+        s.drag.reset(); s.target.reset(); s.hover.reset(); s.neutral_until = field + 8; return {};
     }
     if (!s.active && !s.drag && s.hover) {
         s.drive.reset(); s.settle_until = 0;

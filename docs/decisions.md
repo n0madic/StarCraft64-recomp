@@ -2442,14 +2442,20 @@ the controller. The hover cap of 8 native pixels per guest field and a three-fie
 prediction horizon add conspicuous travel time even when the host pointer moves
 immediately. A player reported severe lag following a Windows build.
 
-**Decision:** Mouse hover uses the existing action steering profile: a 16 px/field
-cap, horizon 1 and snapshot-age gain 1.5. Touch, queued clicks and drag profiles,
-arrival guards, stale-feedback checks and guest memory are unchanged.
+**Decision:** Mouse hover raises its step cap to the action profile's 16 px/field and keeps
+the ADR-066 horizon 3 and snapshot-age gain 1. Touch, queued clicks and drag profiles,
+arrival guards, stale-feedback checks and guest memory are unchanged. Since ADR-095 this
+steering is the fallback for mouse hover, used when the direct cursor is off or not
+acknowledged.
 
-**Consequences:** Synthetic cursor simulations cover changed targets, delayed
-snapshots and convergence; the first long step exceeds the old 8 px/field cap.
-The original stick still limits cursor speed, and stale frames can still add lag.
-A Windows player reported that the later direct-input and presentation changes majorly improved mouse responsiveness; cross-platform responsiveness and overshoot remain unverified.
+**Consequences:** The proposed horizon 1 and age gain 1.5 hunted around a still target on
+macOS with a real pointer and `sc64.direct_mouse=0` (2026-11-14, `local/reports/mouse-stick-3`):
+the cursor swung between x 50.8 and 64.4 around 55.9 for more than 40 fields. The log shows why:
+a stick submitted in field f moves the cursor between snapshots f and f+1 while the observed
+snapshot is two fields old, so horizon 1 overshoots. The hover simulation in `test_gestures.cpp`
+now models that one-field pipeline and fails with horizon 1. With horizon 3 the same physical
+moves (`mouse-stick-4`) arrived in 28–43 fields and stayed within 1.7 px. `check_hover.py`
+schema 4 uses these constants. The original stick still limits cursor speed.
 
 ## ADR-095 — Experimental direct mouse hover through the original cursor setter
 
@@ -2464,6 +2470,9 @@ call the original setter with the full guest context saved and restored. Fence t
 coordinate bounds, live mode/player/modal state and exact instructions at the setter and query.
 Suppress analog hover only after a setter call is acknowledged; otherwise retain stick steering.
 Keyboard/gamepad, menus, HUD, minimap, queued clicks and drags retain their existing ownership.
+The setter is resolved once from the module's section table when the session starts; without it
+the handler is not installed and the shell logs a warning. `sc64.direct_mouse` (default 1) turns
+the path off; touch never uses it (ADR-098).
 
 **Consequences:** This is a gameplay-affecting experiment, not acceptance: the original function
 modifies guest cursor state. Synthetic tests cover request guards, hook routing, fallback and
@@ -2519,3 +2528,38 @@ new hover position. These recipes bypass OS pointer delivery and do not prove vi
 selection semantics or physical scrolling; user verification is pending. Each run recorded one
 audio underrun during startup. Private logs are `local/dist/windows-mouse-fixes/top-edge.log`,
 `local/dist/windows-mouse-fixes/drag-proof.log` and `local/dist/windows-mouse-controls/right-clicks-final.log`.
+
+## ADR-098 — Direct mouse cursor by default, letterbox edges and drag release
+
+**Context:** ADR-095/097 were reviewed as experiments: the direct path could not be turned off,
+the setter was searched in every section on every request, and an edge band two native pixels
+wide had no physical stop beside the letterbox of a wide window, so overshooting it stopped the
+scroll. On macOS with a real pointer a selection dragged to the right edge did not finish: while
+A is held, the original keeps the cursor at x ≤ 304 and scrolls the camera instead, so the
+released drag waited for a target it could not reach and was cancelled after 360 fields. The
+direct path also left a drag at an edge without the stick push that scrolls the camera.
+
+**Decision:** The direct cursor is on by default for the desktop mouse; `--config=sc64.direct_mouse=0`
+restores stick steering (ADR-094) for every mouse path. In a mission a mouse over the letterbox,
+still inside the window, points at the nearest image edge; leaving the window
+(`SDL_EVENT_WINDOW_MOUSE_LEAVE`, or a hover outside it) ends hover. A held button keeps its contact,
+also outside the window while SDL captures the mouse. A press in the letterbox is still not a map
+click. A started selection drag whose point is in an edge band returns to stick steering, which
+pushes the held-A cursor against the edge and scrolls as the original does. With the direct cursor
+on, a released mouse drag ends where the cursor is once a snapshot postdates the release by the
+arrival margin, instead of waiting for its exact target. Hover at an edge keeps ADR-097's Z+stick.
+The pad telemetry marks direct rows (`source.direct`); `check_hover.py` schema 4 checks them.
+
+**Consequences:** Synthetic fixtures cover the switch, the edge bands, letterbox clamping, leaving
+the window, a drag held outside the window, the drag edge handoff and the release, and the setter
+lookup. On macOS (Metal, 2026-11-14) real OS pointer events from automated desktop control, not a
+person's hand, in Wasteland from a copy of the player's save (`local/reports/mouse-direct-1`,
+`mouse-direct-2`): the cursor sat under the pointer 0.3 s after a move; a box selected ten units;
+three right clicks gave three B pulses at their native targets; the HUD Move button and a map click
+sent C-Right and A at the clicked point; all four edges scrolled about 8 map pixels per field, as
+fast as stick steering; in full screen the letterbox scrolled at both sides; a drag to the right
+edge scrolled while held and selected ten units 0.4 s after release. No `ERROR` lines. Not
+verified: Windows/Linux pointers, a person's play, other maps, modal states beyond the advisor
+message, 2P, multiple displays and the system pointer's own feel. A corner button beside the
+letterbox still takes hover over its own area there. With `sc64.direct_mouse=0` a drag released at
+an edge still waits for the cursor (D-065).

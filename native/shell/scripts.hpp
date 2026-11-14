@@ -207,6 +207,8 @@ private:
     double next_log_ = 0;
     bool test_paused_ = false, test_resumed_ = false;
     bool ui_target_log_ = false;
+    // sc64.direct_mouse (default 1): position the mission cursor through the original setter (ADR-095).
+    bool direct_mouse_ = true;
     std::optional<std::string> ui_selection_log_;
     std::optional<std::pair<double, double>> minimap_log_;
     std::map<int, input::PadOutput> pad_log_;

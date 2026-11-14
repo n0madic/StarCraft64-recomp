@@ -57,4 +57,6 @@ const Sc64ModuleInfo& load(const std::filesystem::path& storage);
 const Sc64ModuleInfo& load_file(const std::filesystem::path& file, std::string_view expected_rom_sha1);
 // The loaded game; throws ModuleError before load().
 const Sc64ModuleInfo& info();
+// The recompiled function that starts at `vram` in the module's section table, or nullptr.
+recomp_func_t* function_at(const Sc64ModuleInfo& info, std::uint32_t vram);
 }

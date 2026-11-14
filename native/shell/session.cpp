@@ -8,6 +8,7 @@
 #include "../runtime/rom_image.hpp"
 #include "../runtime/minimap.hpp"
 #include "../runtime/cursor_target.hpp"
+#include "log.hpp"
 #include <librecomp/game.hpp>
 #include <librecomp/overlays.hpp>
 #include <librecomp/rsp.hpp>
@@ -187,25 +188,22 @@ void Session::start_runtime(std::vector<std::uint8_t> rom, const std::filesystem
     game.thread_create_callback = [](std::uint8_t*, recomp_context*) { runtime::initialize_guest_fpu(); };
     runtime::minimap_input().clear();
     runtime::cursor_input().clear();
-    runtime::set_cursor_handler([](std::uint8_t* ram, void* context) {
+    // Resolved once: the handler runs on every guest input query.
+    static recomp_func_t* cursor_setter = nullptr;
+    cursor_setter = game::function_at(module, runtime::guest::cursor_setter);
+    if (!cursor_setter) shell::log::warning("SC64 cursor setter not found; mouse steers the cursor through the stick");
+    runtime::set_cursor_handler(!cursor_setter ? nullptr : +[](std::uint8_t* ram, void* context) {
         auto& s = session();
         const auto field = s.fields.load();
         auto target = runtime::cursor_input().take({ram, 0x800000}, field);
         if (!target || s.paused || !s.running) return;
-        recomp_func_t* setter = nullptr;
-        const auto& module = game::info();
-        for (std::size_t i = 0; i < module.num_sections; ++i) {
-            const auto& section = module.sections[i];
-            for (std::size_t j = 0; j < section.num_funcs; ++j)
-                if (section.ram_addr + section.funcs[j].offset == 0x80037fe0u)
-                    setter = section.funcs[j].func;
-        }
-        if (!setter) return;
+        // Same guest-thread call discipline as the minimap setter below.
         auto* ctx = static_cast<recomp_context*>(context);
         const auto saved = *ctx;
+        // The setter takes guest 640x480 coordinates: twice the native pixel.
         ctx->r4 = std::clamp<int>(int(std::lround(target->x * 2)), 0, 639);
         ctx->r5 = std::clamp<int>(int(std::lround(target->y * 2)), 0, 479);
-        setter(ram, ctx);
+        cursor_setter(ram, ctx);
         *ctx = saved;
         runtime::cursor_input().applied(field);
     });

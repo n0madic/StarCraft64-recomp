@@ -75,6 +75,8 @@ std::optional<Rect> rectangle(double w, double h, double nw, double nh);
 // form is unclipped: coordinates outside the image lie outside [0,nw) x [0,nh).
 std::optional<Point> to_native_raw(const std::optional<Rect>& rect, double x, double y);
 std::optional<Point> to_native(const std::optional<Rect>& rect, double x, double y);
+// The nearest image pixel to a host point, also from the letterbox around the image.
+std::optional<Point> to_native_clamped(const std::optional<Rect>& rect, double x, double y);
 }
 
 namespace cursor_policy {

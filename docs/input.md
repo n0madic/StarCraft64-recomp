@@ -67,7 +67,8 @@ for the handoff, local-build risks and device acceptance checklist.
 
 | Input | Original controller action |
 |---|---|
-| Move mouse over game image | Steer original cursor toward mouse position |
+| Move mouse over game image | In a 1P mission, place the original cursor at the mouse through its own setter (ADR-095/098); elsewhere, or with `sc64.direct_mouse=0`, steer it toward the mouse |
+| Mouse at an image edge, or over the letterbox beside it, in a mission | Z+stick: scroll the camera toward that edge (ADR-097/098); leaving the window stops it |
 | Left click / short one-finger tap | Reach point, then A (select/activate) |
 | Double one-finger tap / double left click on the map | Coalesce touches, reach point, then one B (contextual order) |
 | Right click / short two-finger tap | Reach point, then B (contextual order) |
@@ -527,6 +528,15 @@ stick far (>8 px) from the target for at most 6 fields (horizon 3 + snapshot age
 logged), and at most one 8 px step of retreat from the closest approach. The
 SDL3 shell run `hud-04` (2026-10-11) accepts all six windows (max 8.15 px/field,
 HUD targets intercepted); see D-055 and D-056.
+
+Since ADR-094/095/098 the mouse in a 1P mission positions the original cursor directly
+through the guarded original setter, and the stick steering above is its fallback (direct
+path off, not yet acknowledged, or a selection drag at an image edge). The fallback hover cap
+is 16 px/field with the ADR-066 horizon 3; horizon 1 hunted around a still target. A released
+mouse drag ends where the cursor is, because the original stops a held-A cursor at x 304 and
+scrolls instead. `check_hover.py` schema 4 accepts direct windows (arrival within the request
+age plus snapshot age, neutral or edge-scroll stick, cursor held at the target) and stick windows
+(cap 16 + 0.5, plateau ≤ 3 + 3 fields, retreat ≤ 16 px). The `hud-04` figures above predate it.
 
 - Engine SHA-256: `784211838dd8cbe58f86e681d93f2801fb44f8682e4d0d8c004699026bb8f139`.
 - Log SHA-256: `947603df7912714b9b70f37992fd6b30fa775ce7be9110765e517c382370537c`.

@@ -376,12 +376,77 @@ int main() {
         host.update(1.0 / 60);
         CHECK(host_native.direct_mouse && host_native.direct_mouse->x == 240);
         CHECK(host_native.submitted->bits == button_a && host_native.submitted->x == 0);
+        // At an image edge the held-A drag returns to stick steering, which
+        // pushes the cursor against the edge.
+        state.gestures.drag->x = 319;
+        host.update(1.0 / 60);
+        CHECK(!host_native.direct_mouse && host_native.submitted->bits == button_a && host_native.submitted->x > 0);
+        // The original stops a held-A cursor at x 304 while the camera scrolls:
+        // a release there ends the drag once a snapshot postdates the release.
+        state.gestures.drag->released = true; state.gestures.drag->released_field = 20;
+        gi.cursor_x = 304; gi.fields = 22; gi.cursor_field = 22;
+        host.update(1.0 / 60);
+        CHECK(state.gestures.drag && host_native.submitted->bits == button_a);
+        gi.fields = 23; gi.cursor_field = 23;
+        host.update(1.0 / 60);
+        CHECK(!state.gestures.drag && host_native.submitted->bits == 0);
+        gi.fields = 20; gi.cursor_field = 20; gi.cursor_x = 100;
         clear(state.gestures);
         set_target(state.gestures, 250, 100);
         host.on_input("right", pressed_event());
         host.update(1.0 / 60);
         CHECK(!host_native.direct_mouse && host_native.submitted->x != 0);
         host.final();
+        // sc64.direct_mouse=0 keeps the stick-steered cursor.
+        Config off;
+        off.set("sc64.direct_mouse", "0");
+        HostScript plain(state, host_native, off);
+        plain.init();
+        clear(state.gestures);
+        host_native.direct_mouse = Point{1, 1};
+        set_target(state.gestures, 250, 100);
+        plain.update(1.0 / 60);
+        CHECK(!host_native.direct_mouse && host_native.submitted->x != 0);
+        // Without the direct cursor a released drag still waits for arrival.
+        clear(state.gestures);
+        state.gestures.drag = std::make_shared<Drag>();
+        state.gestures.drag->x = 319; state.gestures.drag->y = 100; state.gestures.drag->direct_mouse = true;
+        state.gestures.drag->started = true; state.gestures.drag->released = true; state.gestures.drag->released_field = 10;
+        plain.update(1.0 / 60);
+        CHECK(state.gestures.drag && host_native.submitted->bits == button_a);
+        plain.final();
+    }
+    // A mission mouse over the letterbox of a wide window points at the nearest
+    // image edge; leaving the window ends hover; a held drag keeps its edge
+    // target outside the window (SDL captures the mouse while a button is held).
+    shared.pad = {}; shared.gestures = {};
+    guest.width = 320; guest.height = 240; guest.ui_mode = "game"; guest.ui_field = guest.fields;
+    guest.running = true;
+    native.size = {2560, 1440};  // image 1920x1440 at x 320..2239
+    {
+        GuiScript wide(shared, native, config, store);
+        wide.init();
+        const auto at = [](double sx, double sy) { return at_point(sx * 960 / 2560, 720 - sy * 720 / 1440, sx, sy); };
+        wide.on_input(nullopt, at(100, 720));
+        CHECK(g.hover && g.hover->x == 0 && edge_direction(g.hover->x, g.hover->y) == std::pair(-1, 0));
+        wide.on_input(nullopt, at(2500, 720));
+        CHECK(g.hover && edge_direction(g.hover->x, g.hover->y) == std::pair(1, 0));
+        wide.on_input(nullopt, at(-3, 720));
+        CHECK(!g.hover);
+        { auto e = at(100, 720); e.pressed = true; wide.on_input("touch_mouse", e); }
+        CHECK(g.contacts.empty() && g.queue.empty());  // a letterbox click is not a map click
+        // Native (100,120): x = 320 + 100.5 * 6 - .5, rows from the bottom = (239.5 - 120) * 6 - .5 + 1.
+        { auto e = at(922.5, 717.5); e.pressed = true; wide.on_input("touch_mouse", e); }
+        CHECK(g.contacts.contains("mouse"));
+        wide.on_input(nullopt, at(1500, 717.5));
+        CHECK(g.drag);
+        wide.on_input(nullopt, at(2500, 717.5));
+        CHECK(g.drag && edge_direction(g.drag->x, g.drag->y) == std::pair(1, 0));
+        wide.on_input(nullopt, at(2600, 717.5));
+        CHECK(g.drag && edge_direction(g.drag->x, g.drag->y) == std::pair(1, 0) && !g.drag->released);
+        { auto e = at(2600, 717.5); e.released = true; wide.on_input("touch_mouse", e); }
+        CHECK(g.drag && g.drag->released);
+        clear(g);
     }
     // Actual GUI gesture adapter uses physical screen coordinates on a HiDPI
     // window, consumes right click, and lets Continue A bypass a frozen cursor.
